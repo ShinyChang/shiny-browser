@@ -1,0 +1,237 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f4f4f5;
+  --surface: #ffffff;
+  --text: #18181b;
+  --muted: #71717a;
+  --border: #e4e4e7;
+  --control: #f4f4f5;
+  --control-hover: #e4e4e7;
+  --accent: #2563eb;
+  --checker-a: #ffffff;
+  --checker-b: #e4e4e7;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111113;
+    --surface: #1c1c1f;
+    --text: #f4f4f5;
+    --muted: #a1a1aa;
+    --border: #2e2e33;
+    --control: #27272a;
+    --control-hover: #34343a;
+    --accent: #60a5fa;
+    --checker-a: #2a2a2e;
+    --checker-b: #1f1f23;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.4 system-ui, sans-serif;
+}
+
+header,
+footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-color: var(--border);
+  border-style: solid;
+  border-width: 0;
+}
+
+header {
+  justify-content: space-between;
+  border-bottom-width: 1px;
+}
+
+footer {
+  border-top-width: 1px;
+}
+
+.title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+#name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+#meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
+button,
+select {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--control);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled),
+select:hover:not(:disabled) {
+  background: var(--control-hover);
+}
+
+button:disabled,
+select:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+button:focus-visible,
+select:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+button.icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  padding: 0;
+}
+
+button.icon svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+#loop[aria-pressed="false"] {
+  color: var(--muted);
+}
+
+#loop[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+#play .when-playing,
+#play.playing .when-paused {
+  display: none;
+}
+
+#play.playing .when-playing {
+  display: block;
+}
+
+#scrub {
+  flex: 1;
+  min-width: 60px;
+  accent-color: var(--accent);
+}
+
+.mono {
+  font-variant-numeric: tabular-nums;
+}
+
+#frame {
+  min-width: 84px;
+  color: var(--muted);
+  text-align: right;
+}
+
+#stage {
+  position: relative;
+  display: grid;
+  min-height: 0;
+  padding: 24px;
+}
+
+#stage.dragging {
+  outline: 2px dashed var(--accent);
+  outline-offset: -10px;
+}
+
+/* The canvas keeps the animation's aspect ratio and fills whichever axis runs out first. */
+.fit {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  container-type: size;
+}
+
+canvas {
+  width: min(100cqw, 100cqh * var(--ratio, 1));
+  aspect-ratio: var(--ratio, 1);
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+canvas[data-background="checker"] {
+  background: repeating-conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%) 0 0 / 20px 20px;
+}
+
+canvas[data-background="light"] {
+  background: #ffffff;
+}
+
+canvas[data-background="dark"] {
+  background: #000000;
+}
+
+#message {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  margin: 0;
+  padding: 24px;
+  color: var(--muted);
+  text-align: center;
+  pointer-events: none;
+}
+
+#message.error {
+  color: #dc2626;
+}
+
+@media (max-width: 560px) {
+  #meta,
+  #speed {
+    display: none;
+  }
+}

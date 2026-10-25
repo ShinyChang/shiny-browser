@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "Lottie Preview",
+  "version": "1.0.0",
+  "description": "Plays .lottie files and Lottie JSON instead of downloading them or showing raw text.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA11gGvHBuukZgvTteHT9ExvrNwa0A6GsH/T+2c4bQgitH4oQSU52A0Yb24eITZJsQTWAsLWGMQYsMvhD+NwJLb3rGz0JNm9qJmLXC87H8QY1DVoLUGtNzuuoecDEPRExB55jHqqC72k1IcQXMH3mpPSX+vJkMlYbbBkMrwXyU/pyOmjV/xDyCD7/MCOSVP489itpYeKmJsbL9VuxjSFKY4Y105xcU/43xVZT+6G9JZyq0e4A4Ka0f+dFjnEDyd2GRCGlOJYfE5VazQxMHCTYsh45Na847C9DxcwFSbEH2k9esdw8yGTie9iGLyAIWEDpZ/XBDp+ht7yKy/Edn9ojhfwIDAQAB",
+  "permissions": [
+    "declarativeNetRequestWithHostAccess",
+    "downloads"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_end"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "viewer.html",
+        "viewer.css",
+        "viewer.js",
+        "vendor/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
+}
