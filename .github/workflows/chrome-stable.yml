@@ -1,0 +1,29 @@
+name: Chrome stable check
+
+on:
+  schedule:
+    - cron: "17 1 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Print the issue instead of opening it
+        type: boolean
+        default: false
+      assume_current:
+        description: Pretend Shiny is on this version (testing)
+        required: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/check-chrome-stable.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
+          ASSUME_CURRENT: ${{ inputs.assume_current }}
