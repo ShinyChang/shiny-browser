@@ -19,11 +19,10 @@ Chrome stable for Mac is now **$latest** (Shiny is on $current).
 - Version history: https://versionhistory.googleapis.com/v1/chrome/platforms/mac/channels/stable/versions
 
 Update checklist:
-- [ ] Sync $latest on Studio and apply the ide patches
-- [ ] Build Shiny
-- [ ] Smoke test 22/22
+- [ ] Set CHROMIUM_VERSION to $latest and run scripts/build.sh in a new WORKDIR; it stops at a patch that no longer applies
+- [ ] Smoke test
 - [ ] Install on the MacBook
-- [ ] Commit, bump CHROMIUM_VERSION, close this issue
+- [ ] Run scripts/export-patches.sh, commit, close this issue
 BODY
 )"
 # The same version only ever gets one issue, open or closed.

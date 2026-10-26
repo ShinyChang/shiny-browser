@@ -1,0 +1,2041 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shiny <owner@shinychang.net>
+Date: Sun, 25 Oct 2026 17:05:26 +0800
+Subject: [PATCH] feat: IDE-style browser shell on Chromium 156.0.8078.48
+
+Single toolbar with no tab strip, avatar, app menu or bookmark bar; the
+URL is centered and goes left-aligned while editing. Downloads is the
+only pinned action, password saving and bookmark editing default off,
+and the profile lives in "Chromium IDE".
+
+New commands, registered as ActionItems because 156 routes browser
+commands through the Actions framework:
+- Cmd+T Go to Anything: open tabs by recency, history, recently closed,
+  then open the URL or search in a new tab.
+- Cmd+Shift+P command palette, not reserved so DevTools keeps its own.
+- Ctrl+Tab cycles tabs in most-recently-used order with a hold overlay.
+- Background tabs unfocused for 12 hours close automatically, except
+  pinned, audible, capturing or unload-pending ones.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
+---
+ chrome/app/app-Info.plist                     |    2 +
+ chrome/app/chrome_command_ids.h               |    2 +
+ chrome/browser/prefs/browser_prefs.cc         |    2 +-
+ chrome/browser/ui/BUILD.gn                    |    8 +
+ chrome/browser/ui/actions/chrome_action_id.h  |    2 +
+ chrome/browser/ui/browser_actions.cc          |   27 +-
+ .../browser/ui/browser_command_controller.cc  |   23 +-
+ chrome/browser/ui/cocoa/accelerators_cocoa.mm |    4 +-
+ chrome/browser/ui/cocoa/main_menu_builder.mm  |   12 +
+ .../browser/ui/toolbar/toolbar_pref_names.cc  |   28 +-
+ chrome/browser/ui/ui_features.cc              |    2 +-
+ .../chrome_browser_main_extra_parts_views.cc  |    2 +
+ .../browser_view_layout_delegate_impl.cc      |    7 +
+ chrome/browser/ui/views/ide/ide_idle_tabs.cc  |   79 ++
+ chrome/browser/ui/views/ide/ide_internal.h    |  103 ++
+ chrome/browser/ui/views/ide/ide_mac.mm        |   23 +
+ chrome/browser/ui/views/ide/ide_mru.cc        |  284 +++++
+ chrome/browser/ui/views/ide/ide_palette.cc    | 1000 +++++++++++++++++
+ chrome/browser/ui/views/ide/ide_palette.h     |   27 +
+ .../ui/views/omnibox/omnibox_view_views.cc    |    4 +
+ .../pinned_toolbar_actions_container.cc       |    2 +
+ .../browser/ui/views/toolbar/toolbar_view.cc  |    8 +-
+ .../bookmarks/browser/bookmark_utils.cc       |    4 +-
+ .../core/browser/password_manager.cc          |    2 +-
+ 24 files changed, 1615 insertions(+), 42 deletions(-)
+ create mode 100644 chrome/browser/ui/views/ide/ide_idle_tabs.cc
+ create mode 100644 chrome/browser/ui/views/ide/ide_internal.h
+ create mode 100644 chrome/browser/ui/views/ide/ide_mac.mm
+ create mode 100644 chrome/browser/ui/views/ide/ide_mru.cc
+ create mode 100644 chrome/browser/ui/views/ide/ide_palette.cc
+ create mode 100644 chrome/browser/ui/views/ide/ide_palette.h
+
+diff --git a/chrome/app/app-Info.plist b/chrome/app/app-Info.plist
+index 6fada0a2b1..2fa05b59da 100644
+--- a/chrome/app/app-Info.plist
++++ b/chrome/app/app-Info.plist
+@@ -157,6 +157,8 @@
+ 	<string>6.0</string>
+ 	<key>CFBundleName</key>
+ 	<string>${CHROMIUM_SHORT_NAME}</string>
++	<key>CrProductDirName</key>
++	<string>Chromium IDE</string>
+ 	<key>CFBundlePackageType</key>
+ 	<string>APPL</string>
+ 	<key>CFBundleSignature</key>
+diff --git a/chrome/app/chrome_command_ids.h b/chrome/app/chrome_command_ids.h
+index a9f146ad74..c252c1dabc 100644
+--- a/chrome/app/chrome_command_ids.h
++++ b/chrome/app/chrome_command_ids.h
+@@ -59,6 +59,8 @@
+ #define IDC_SELECT_PREVIOUS_TAB         34017
+ #define IDC_CYCLE_TO_NEXT_TAB           34062
+ #define IDC_CYCLE_TO_PREV_TAB           34063
++#define IDC_IDE_GOTO_ANYTHING           34090
++#define IDC_IDE_COMMAND_PALETTE         34091
+ #define IDC_SELECT_TAB_0                34018
+ #define IDC_SELECT_TAB_1                34019
+ #define IDC_SELECT_TAB_2                34020
+diff --git a/chrome/browser/prefs/browser_prefs.cc b/chrome/browser/prefs/browser_prefs.cc
+index 35b02686a1..99bb40b24d 100644
+--- a/chrome/browser/prefs/browser_prefs.cc
++++ b/chrome/browser/prefs/browser_prefs.cc
+@@ -1881,7 +1881,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry,
+   contextual_search::ContextualSearchService::RegisterProfilePrefs(registry);
+   contextual_tasks::RegisterProfilePrefs(registry);
+   registry->RegisterIntegerPref(prefs::kContextualTasksNextPanelOpenCount, 0);
+-  registry->RegisterBooleanPref(prefs::kCtrlTabMru, false);
++  registry->RegisterBooleanPref(prefs::kCtrlTabMru, true);
+   cross_device::RegisterProfilePrefs(registry);
+   device_signals::RegisterProfilePrefs(registry);
+   enterprise::RegisterIdentifiersProfilePrefs(registry);
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index 238f8625e4..fbd5514d58 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -3536,7 +3536,15 @@ static_library("ui") {
+       "views/frame/horizontal_tab_strip_region_view.h",
+       "views/frame/vertical_tab_strip_region_view.cc",
+       "views/frame/vertical_tab_strip_region_view.h",
++      "views/ide/ide_idle_tabs.cc",
++      "views/ide/ide_internal.h",
++      "views/ide/ide_mru.cc",
++      "views/ide/ide_palette.cc",
++      "views/ide/ide_palette.h",
+     ]
++    if (is_mac) {
++      sources += [ "views/ide/ide_mac.mm" ]
++    }
+ 
+     sources += get_target_outputs(":webui_name_variants")
+ 
+diff --git a/chrome/browser/ui/actions/chrome_action_id.h b/chrome/browser/ui/actions/chrome_action_id.h
+index 49f05998da..b3b3b2f82e 100644
+--- a/chrome/browser/ui/actions/chrome_action_id.h
++++ b/chrome/browser/ui/actions/chrome_action_id.h
+@@ -37,6 +37,8 @@
+   E(kActionSelectPreviousTab, IDC_SELECT_PREVIOUS_TAB) \
+   E(kActionCycleToNextTab, IDC_CYCLE_TO_NEXT_TAB) \
+   E(kActionCycleToPrevTab, IDC_CYCLE_TO_PREV_TAB) \
++  E(kActionIdeGotoAnything, IDC_IDE_GOTO_ANYTHING) \
++  E(kActionIdeCommandPalette, IDC_IDE_COMMAND_PALETTE) \
+   E(kActionSelectTab0, IDC_SELECT_TAB_0) \
+   E(kActionSelectTab1, IDC_SELECT_TAB_1) \
+   E(kActionSelectTab2, IDC_SELECT_TAB_2) \
+diff --git a/chrome/browser/ui/browser_actions.cc b/chrome/browser/ui/browser_actions.cc
+index 0f7a326019..6098e9aaf7 100644
+--- a/chrome/browser/ui/browser_actions.cc
++++ b/chrome/browser/ui/browser_actions.cc
+@@ -53,6 +53,7 @@
+ #include "chrome/browser/ui/startup/default_browser_prompt/default_browser_prompt_prefs.h"
+ #include "chrome/browser/ui/tabs/saved_tab_groups/tab_group_menu_utils.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "chrome/browser/ui/views/ide/ide_palette.h"
+ #include "chrome/browser/ui/web_applications/web_app_launch_utils.h"
+ #include "chrome/common/webui_url_constants.h"
+ #include "components/saved_tab_groups/public/tab_group_sync_service.h"
+@@ -3063,7 +3064,7 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
+                 if (chrome::IsCtrlTabMruEnabled(bwi)) {
+                   base::RecordAction(
+                       base::UserMetricsAction("Accel_CycleToNextTab"));
+-                  chrome::CycleToMruTab(bwi);
++                  ide::CycleMruTab(bwi, /*reverse=*/false);
+                 } else {
+                   base::RecordAction(
+                       base::UserMetricsAction("Accel_SelectNextTab"));
+@@ -3082,7 +3083,7 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
+                 if (chrome::IsCtrlTabMruEnabled(bwi)) {
+                   base::RecordAction(
+                       base::UserMetricsAction("Accel_CycleToPrevTab"));
+-                  chrome::CycleToMruTab(bwi);
++                  ide::CycleMruTab(bwi, /*reverse=*/true);
+                 } else {
+                   base::RecordAction(
+                       base::UserMetricsAction("Accel_SelectPreviousTab"));
+@@ -3093,6 +3094,28 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
+           .SetActionId(kActionCycleToPrevTab)
+           .Build());
+ 
++  root_action_item_->AddChild(
++      actions::ActionItem::Builder(
++          base::BindRepeating(
++              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
++                 actions::ActionInvocationContext context) {
++                ide::ShowPalette(bwi, ide::PaletteMode::kGoto);
++              },
++              bwi))
++          .SetActionId(kActionIdeGotoAnything)
++          .Build());
++
++  root_action_item_->AddChild(
++      actions::ActionItem::Builder(
++          base::BindRepeating(
++              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
++                 actions::ActionInvocationContext context) {
++                ide::ShowPalette(bwi, ide::PaletteMode::kCommands);
++              },
++              bwi))
++          .SetActionId(kActionIdeCommandPalette)
++          .Build());
++
+   root_action_item_->AddChild(
+       actions::ActionItem::Builder(
+           base::BindRepeating(
+diff --git a/chrome/browser/ui/browser_command_controller.cc b/chrome/browser/ui/browser_command_controller.cc
+index 921461b9e9..58a15f65d2 100644
+--- a/chrome/browser/ui/browser_command_controller.cc
++++ b/chrome/browser/ui/browser_command_controller.cc
+@@ -59,6 +59,7 @@
+ #include "chrome/browser/ui/actions/command_action_updater.h"
+ #include "chrome/browser/ui/browser_actions.h"
+ #include "chrome/browser/ui/browser_commands.h"
++#include "chrome/browser/ui/views/ide/ide_palette.h"
+ #include "chrome/browser/ui/browser_element_identifiers.h"
+ #include "chrome/browser/ui/browser_select_file_dialog_controller.h"
+ #include "chrome/browser/ui/browser_window.h"
+@@ -536,7 +537,8 @@ bool BrowserCommandController::IsReservedCommandOrKey(
+          command_id == IDC_SELECT_NEXT_TAB ||
+          command_id == IDC_SELECT_PREVIOUS_TAB ||
+          command_id == IDC_CYCLE_TO_NEXT_TAB ||
+-         command_id == IDC_CYCLE_TO_PREV_TAB || command_id == IDC_EXIT;
++         command_id == IDC_CYCLE_TO_PREV_TAB || command_id == IDC_EXIT ||
++         command_id == IDC_IDE_GOTO_ANYTHING;
+ }
+ 
+ void BrowserCommandController::TabStateChanged() {
+@@ -760,6 +762,12 @@ void BrowserCommandController::HandleCommandWithDisposition(
+       NewTabToRight(browser_);
+       break;
+     }
++    case IDC_IDE_GOTO_ANYTHING:
++      ide::ShowPalette(browser_, ide::PaletteMode::kGoto);
++      break;
++    case IDC_IDE_COMMAND_PALETTE:
++      ide::ShowPalette(browser_, ide::PaletteMode::kCommands);
++      break;
+     case IDC_CLOSE_TAB:
+       base::RecordAction(base::UserMetricsAction("CloseTabByKey"));
+       CloseTab(browser_);
+@@ -781,10 +789,7 @@ void BrowserCommandController::HandleCommandWithDisposition(
+     case IDC_CYCLE_TO_NEXT_TAB:
+       if (IsCtrlTabMruEnabled(browser_)) {
+         base::RecordAction(base::UserMetricsAction("Accel_CycleToNextTab"));
+-        CycleToMruTab(browser_,
+-                      TabStripUserGestureDetails(
+-                          TabStripUserGestureDetails::GestureType::kKeyboard,
+-                          time_stamp));
++        ide::CycleMruTab(browser_, /*reverse=*/false);
+       } else {
+         base::RecordAction(base::UserMetricsAction("Accel_SelectNextTab"));
+         SelectNextTab(browser_,
+@@ -796,10 +801,7 @@ void BrowserCommandController::HandleCommandWithDisposition(
+     case IDC_CYCLE_TO_PREV_TAB:
+       if (IsCtrlTabMruEnabled(browser_)) {
+         base::RecordAction(base::UserMetricsAction("Accel_CycleToPrevTab"));
+-        CycleToMruTab(browser_,
+-                      TabStripUserGestureDetails(
+-                          TabStripUserGestureDetails::GestureType::kKeyboard,
+-                          time_stamp));
++        ide::CycleMruTab(browser_, /*reverse=*/true);
+       } else {
+         base::RecordAction(base::UserMetricsAction("Accel_SelectPreviousTab"));
+         SelectPreviousTab(
+@@ -1970,6 +1972,9 @@ void BrowserCommandController::InitCommandState() {
+                                          supports_tabs);
+   command_updater_->UpdateCommandEnabled(IDC_CYCLE_TO_NEXT_TAB, supports_tabs);
+   command_updater_->UpdateCommandEnabled(IDC_CYCLE_TO_PREV_TAB, supports_tabs);
++  command_updater_->UpdateCommandEnabled(IDC_IDE_GOTO_ANYTHING, supports_tabs);
++  command_updater_->UpdateCommandEnabled(IDC_IDE_COMMAND_PALETTE,
++                                         supports_tabs);
+   command_updater_->UpdateCommandEnabled(IDC_MOVE_TAB_NEXT, supports_tabs);
+   command_updater_->UpdateCommandEnabled(IDC_MOVE_TAB_PREVIOUS, supports_tabs);
+   command_updater_->UpdateCommandEnabled(IDC_SELECT_TAB_0, supports_tabs);
+diff --git a/chrome/browser/ui/cocoa/accelerators_cocoa.mm b/chrome/browser/ui/cocoa/accelerators_cocoa.mm
+index 12d6be60e2..bb4be6f05a 100644
+--- a/chrome/browser/ui/cocoa/accelerators_cocoa.mm
++++ b/chrome/browser/ui/cocoa/accelerators_cocoa.mm
+@@ -41,7 +41,9 @@
+     {IDC_FIND, ui::EF_COMMAND_DOWN, ui::VKEY_F},
+     {IDC_NEW_INCOGNITO_WINDOW, ui::EF_COMMAND_DOWN | ui::EF_SHIFT_DOWN,
+      ui::VKEY_N},
+-    {IDC_NEW_TAB, ui::EF_COMMAND_DOWN, ui::VKEY_T},
++    {IDC_IDE_GOTO_ANYTHING, ui::EF_COMMAND_DOWN, ui::VKEY_T},
++    {IDC_IDE_COMMAND_PALETTE, ui::EF_COMMAND_DOWN | ui::EF_SHIFT_DOWN,
++     ui::VKEY_P},
+     {IDC_NEW_WINDOW, ui::EF_COMMAND_DOWN, ui::VKEY_N},
+     {IDC_PASTE, ui::EF_COMMAND_DOWN, ui::VKEY_V},
+     {IDC_PRINT, ui::EF_COMMAND_DOWN, ui::VKEY_P},
+diff --git a/chrome/browser/ui/cocoa/main_menu_builder.mm b/chrome/browser/ui/cocoa/main_menu_builder.mm
+index 0476742487..1ce16ccf5d 100644
+--- a/chrome/browser/ui/cocoa/main_menu_builder.mm
++++ b/chrome/browser/ui/cocoa/main_menu_builder.mm
+@@ -120,6 +120,14 @@
+       Item(IDS_FILE_MENU_MAC)
+           .tag(IDC_FILE_MENU)
+           .submenu({
++              // Titles are replaced below; the string ids only satisfy the
++              // builder, which has no plain-title setter.
++              Item(IDS_NEW_TAB_MAC)
++                  .command_id(IDC_IDE_GOTO_ANYTHING)
++                  .remove_if(is_pwa),
++              Item(IDS_NEW_TAB_MAC)
++                  .command_id(IDC_IDE_COMMAND_PALETTE)
++                  .remove_if(is_pwa),
+               Item(IDS_NEW_TAB_MAC)
+                   .command_id(IDC_NEW_TAB)
+                   .remove_if(is_pwa),
+@@ -169,6 +177,10 @@
+           .Build();
+   // clang-format on
+ 
++  [item.submenu itemWithTag:IDC_IDE_GOTO_ANYTHING].title = @"Go to Anything…";
++  [item.submenu itemWithTag:IDC_IDE_COMMAND_PALETTE].title =
++      @"Command Palette…";
++
+   return item;
+ }
+ 
+diff --git a/chrome/browser/ui/toolbar/toolbar_pref_names.cc b/chrome/browser/ui/toolbar/toolbar_pref_names.cc
+index f94f1a9c0c..8220890d01 100644
+--- a/chrome/browser/ui/toolbar/toolbar_pref_names.cc
++++ b/chrome/browser/ui/toolbar/toolbar_pref_names.cc
+@@ -15,31 +15,15 @@ namespace toolbar {
+ 
+ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
+   base::ListValue default_pinned_actions;
+-  const std::optional<std::string>& chrome_labs_action =
+-      actions::ActionIdMap::ActionIdToString(kActionShowChromeLabs);
++  // The downloads button is always visible so the popup list is one click
++  // away even when nothing is downloading.
++  const std::optional<std::string>& downloads_action =
++      actions::ActionIdMap::ActionIdToString(kActionShowDownloads);
+   // ActionIdToStringMappings are not initialized in unit tests, therefore will
+   // not have a value. In the normal case, the action should always have a
+   // value.
+-  if (chrome_labs_action.has_value()) {
+-    default_pinned_actions.Append(chrome_labs_action.value());
+-  }
+-
+-  if (base::FeatureList::IsEnabled(
+-          features::kTabsFromOtherDevicesSidePanelPinnedByDefault)) {
+-    const std::optional<std::string>& tabs_from_other_devices_action =
+-        actions::ActionIdMap::ActionIdToString(
+-            kActionSidePanelShowTabsFromOtherDevices);
+-    if (tabs_from_other_devices_action.has_value()) {
+-      default_pinned_actions.Append(tabs_from_other_devices_action.value());
+-    }
+-  }
+-
+-  if (base::FeatureList::IsEnabled(ttc::kTtc)) {
+-    const std::optional<std::string>& ttc_action =
+-        actions::ActionIdMap::ActionIdToString(kActionTtcToolbar);
+-    if (ttc_action.has_value()) {
+-      default_pinned_actions.Append(ttc_action.value());
+-    }
++  if (downloads_action.has_value()) {
++    default_pinned_actions.Append(downloads_action.value());
+   }
+ 
+   registry->RegisterListPref(prefs::kPinnedActions,
+diff --git a/chrome/browser/ui/ui_features.cc b/chrome/browser/ui/ui_features.cc
+index 562d852958..ad09b2f13b 100644
+--- a/chrome/browser/ui/ui_features.cc
++++ b/chrome/browser/ui/ui_features.cc
+@@ -42,7 +42,7 @@ BASE_FEATURE(kAllowEyeDropperWGCScreenCapture,
+ #endif  // BUILDFLAG(IS_WIN)
+ );
+ 
+-BASE_FEATURE(kCtrlTabMru, base::FEATURE_DISABLED_BY_DEFAULT);
++BASE_FEATURE(kCtrlTabMru, base::FEATURE_ENABLED_BY_DEFAULT);
+ 
+ BASE_FEATURE(kImportExportFlags, base::FEATURE_DISABLED_BY_DEFAULT);
+ 
+diff --git a/chrome/browser/ui/views/chrome_browser_main_extra_parts_views.cc b/chrome/browser/ui/views/chrome_browser_main_extra_parts_views.cc
+index 154a2af1cd..d02997b11f 100644
+--- a/chrome/browser/ui/views/chrome_browser_main_extra_parts_views.cc
++++ b/chrome/browser/ui/views/chrome_browser_main_extra_parts_views.cc
+@@ -22,6 +22,7 @@
+ #include "chrome/browser/ui/views/chrome_layout_provider.h"
+ #include "chrome/browser/ui/views/chrome_views_delegate.h"
+ #include "chrome/browser/ui/views/media_router/media_router_dialog_controller_views.h"
++#include "chrome/browser/ui/views/ide/ide_palette.h"
+ #include "chrome/browser/ui/views/relaunch_notification/relaunch_notification_controller.h"
+ #include "chrome/common/chrome_paths.h"
+ #include "chrome/grit/generated_resources.h"
+@@ -196,6 +197,7 @@ void ChromeBrowserMainExtraPartsViews::PostBrowserStart() {
+           UpgradeDetector::GetInstance());
+ 
+   infobars::RegisterInfoBars();
++  ide::StartIdleTabCloser();
+ }
+ 
+ void ChromeBrowserMainExtraPartsViews::PostMainMessageLoopRun() {
+diff --git a/chrome/browser/ui/views/frame/layout/browser_view_layout_delegate_impl.cc b/chrome/browser/ui/views/frame/layout/browser_view_layout_delegate_impl.cc
+index 162cb04878..11aa7f94b1 100644
+--- a/chrome/browser/ui/views/frame/layout/browser_view_layout_delegate_impl.cc
++++ b/chrome/browser/ui/views/frame/layout/browser_view_layout_delegate_impl.cc
+@@ -58,6 +58,13 @@ BrowserViewLayoutDelegateImpl::GetTabStripType() const {
+     return TabStripType::kNone;
+   }
+ 
++  // Tabs are reached from the keyboard (Cmd+T, Ctrl+Tab), so normal windows
++  // keep only the toolbar, laid out in the caption row like vertical-tab mode.
++  if (browser_view_->browser()->GetType() ==
++      BrowserWindowInterface::Type::TYPE_NORMAL) {
++    return TabStripType::kNone;
++  }
++
+   // Determine if there is a vertical tab strip.
+   if (browser_view_->browser()->GetType() ==
+       BrowserWindowInterface::Type::TYPE_NORMAL) {
+diff --git a/chrome/browser/ui/views/ide/ide_idle_tabs.cc b/chrome/browser/ui/views/ide/ide_idle_tabs.cc
+new file mode 100644
+index 0000000000..7e044c08ee
+--- /dev/null
++++ b/chrome/browser/ui/views/ide/ide_idle_tabs.cc
+@@ -0,0 +1,79 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "base/functional/bind.h"
++#include "base/no_destructor.h"
++#include "base/time/time.h"
++#include "base/timer/timer.h"
++#include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
++#include "chrome/browser/media/webrtc/media_stream_capture_indicator.h"
++#include "chrome/browser/resource_coordinator/tab_lifecycle_unit_external.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
++#include "chrome/browser/ui/tabs/tab_enums.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "chrome/browser/ui/views/ide/ide_internal.h"
++#include "chrome/browser/ui/views/ide/ide_palette.h"
++#include "content/public/browser/web_contents.h"
++
++namespace ide {
++namespace {
++
++constexpr base::TimeDelta kSweepInterval = base::Minutes(10);
++
++bool IsKeptOpen(content::WebContents* contents) {
++  // Closing would cut off playback or a call, or could drop unsaved input.
++  return contents->IsCurrentlyAudible() ||
++         contents->NeedToFireBeforeUnloadOrUnloadEvents() ||
++         MediaCaptureDevicesDispatcher::GetInstance()
++             ->GetMediaStreamCaptureIndicator()
++             ->IsCapturingUserMedia(contents);
++}
++
++}  // namespace
++
++int CloseIdleTabs(base::TimeDelta idle) {
++  const base::Time now = base::Time::Now();
++  int closed = 0;
++  GlobalBrowserCollection::GetInstance()->ForEach(
++      [&](BrowserWindowInterface* browser) {
++        if (browser->GetType() != BrowserWindowInterface::Type::TYPE_NORMAL) {
++          return true;
++        }
++        TabStripModel* model = browser->GetTabStripModel();
++        for (int i = model->count() - 1; i >= 0 && model->count() > 1; --i) {
++          if (i == model->active_index() || model->IsTabPinned(i)) {
++            continue;
++          }
++          content::WebContents* contents = model->GetWebContentsAt(i);
++          if (IsKeptOpen(contents)) {
++            continue;
++          }
++          auto* unit = resource_coordinator::TabLifecycleUnitExternal::
++              FromWebContents(contents);
++          if (!unit) {
++            continue;
++          }
++          const base::Time last_focused = unit->GetLastFocusedTime();
++          if (last_focused.is_max() || now - last_focused < idle) {
++            continue;
++          }
++          model->CloseWebContentsAt(i, TabCloseTypes::CLOSE_NONE);
++          ++closed;
++        }
++        return true;
++      });
++  return closed;
++}
++
++void StartIdleTabCloser() {
++  static base::NoDestructor<base::RepeatingTimer> timer;
++  if (timer->IsRunning()) {
++    return;
++  }
++  timer->Start(FROM_HERE, kSweepInterval,
++               base::BindRepeating([] { CloseIdleTabs(kIdleTabLimit); }));
++}
++
++}  // namespace ide
+diff --git a/chrome/browser/ui/views/ide/ide_internal.h b/chrome/browser/ui/views/ide/ide_internal.h
+new file mode 100644
+index 0000000000..b112aaf6ca
+--- /dev/null
++++ b/chrome/browser/ui/views/ide/ide_internal.h
+@@ -0,0 +1,103 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_IDE_IDE_INTERNAL_H_
++#define CHROME_BROWSER_UI_VIEWS_IDE_IDE_INTERNAL_H_
++
++#include <memory>
++#include <string>
++#include <vector>
++
++#include "base/functional/callback.h"
++#include "base/memory/weak_ptr.h"
++#include "base/time/time.h"
++#include "ui/base/models/image_model.h"
++#include "ui/gfx/geometry/rect.h"
++#include "ui/gfx/range/range.h"
++#include "ui/views/widget/widget.h"
++
++class BrowserWindowInterface;
++
++namespace content {
++class WebContents;
++}
++
++namespace views {
++class BubbleDialogDelegate;
++class View;
++}  // namespace views
++
++namespace ide {
++
++// Owns one bubble's delegate and widget; both are deleted after it closes.
++class BubbleHolder {
++ public:
++  BubbleHolder();
++  BubbleHolder(const BubbleHolder&) = delete;
++  BubbleHolder& operator=(const BubbleHolder&) = delete;
++  ~BubbleHolder();
++
++  // Closes any bubble already shown by this holder first.
++  void Show(std::unique_ptr<views::BubbleDialogDelegate> delegate,
++            bool activate);
++  void Close();
++  views::BubbleDialogDelegate* delegate() { return delegate_.get(); }
++
++ private:
++  void OnClosed(int generation, views::Widget::ClosedReason reason);
++
++  std::unique_ptr<views::BubbleDialogDelegate> delegate_;
++  std::unique_ptr<views::Widget> widget_;
++  // A late close callback from a replaced bubble must not delete the new one.
++  int generation_ = 0;
++  base::WeakPtrFactory<BubbleHolder> weak_factory_{this};
++};
++
++inline constexpr int kPaletteWidth = 640;
++inline constexpr base::TimeDelta kIdleTabLimit = base::Hours(12);
++
++struct RowSpec {
++  RowSpec();
++  RowSpec(const RowSpec&);
++  RowSpec& operator=(const RowSpec&);
++  ~RowSpec();
++
++  ui::ImageModel icon;
++  std::u16string title;
++  std::vector<gfx::Range> title_matches;
++  std::u16string detail;
++  std::u16string hint;
++};
++
++std::unique_ptr<views::View> CreateRow(const RowSpec& spec,
++                                       bool selected,
++                                       base::RepeatingClosure on_click,
++                                       base::RepeatingClosure on_hover);
++
++void SetRowSelected(views::View* row, bool selected);
++
++std::unique_ptr<views::View> CreateSectionHeader(const std::u16string& text);
++
++// Bubble anchor point near the top centre of `browser`'s window, in screen
++// coordinates.
++gfx::Rect GetPaletteAnchorRect(BrowserWindowInterface* browser);
++
++ui::ImageModel GetFavicon(content::WebContents* contents);
++
++// Activates `contents` in whichever window holds it; false if it is gone.
++bool ActivateContents(content::WebContents* contents);
++
++// Closes background tabs not focused for at least `idle`; returns the count.
++int CloseIdleTabs(base::TimeDelta idle);
++
++// Polled by the MRU switcher because the release of a modifier key is not
++// delivered to the browser while web content has focus.
++bool IsControlKeyDown();
++
++// Empty when the command has no keyboard shortcut.
++std::u16string ShortcutForCommand(int command);
++
++}  // namespace ide
++
++#endif  // CHROME_BROWSER_UI_VIEWS_IDE_IDE_INTERNAL_H_
+diff --git a/chrome/browser/ui/views/ide/ide_mac.mm b/chrome/browser/ui/views/ide/ide_mac.mm
+new file mode 100644
+index 0000000000..4e08c28ed9
+--- /dev/null
++++ b/chrome/browser/ui/views/ide/ide_mac.mm
+@@ -0,0 +1,23 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#import <AppKit/AppKit.h>
++
++#include "chrome/browser/ui/cocoa/accelerators_cocoa.h"
++#include "chrome/browser/ui/views/ide/ide_internal.h"
++#include "ui/base/accelerators/accelerator.h"
++
++namespace ide {
++
++bool IsControlKeyDown() {
++  return (NSEvent.modifierFlags & NSEventModifierFlagControl) != 0;
++}
++
++std::u16string ShortcutForCommand(int command) {
++  const ui::Accelerator* accelerator =
++      AcceleratorsCocoa::GetInstance()->GetAcceleratorForCommand(command);
++  return accelerator ? accelerator->GetShortcutText() : std::u16string();
++}
++
++}  // namespace ide
+diff --git a/chrome/browser/ui/views/ide/ide_mru.cc b/chrome/browser/ui/views/ide/ide_mru.cc
+new file mode 100644
+index 0000000000..3e6e2e61e4
+--- /dev/null
++++ b/chrome/browser/ui/views/ide/ide_mru.cc
+@@ -0,0 +1,284 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include <algorithm>
++#include <memory>
++#include <utility>
++#include <vector>
++
++#include "base/functional/bind.h"
++#include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
++#include "base/no_destructor.h"
++#include "base/strings/escape.h"
++#include "base/time/time.h"
++#include "base/timer/timer.h"
++#include "build/build_config.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/resource_coordinator/tab_lifecycle_unit_external.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
++#include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "chrome/browser/ui/views/frame/browser_view.h"
++#include "chrome/browser/ui/views/ide/ide_internal.h"
++#include "chrome/browser/ui/views/ide/ide_palette.h"
++#include "components/url_formatter/url_formatter.h"
++#include "content/public/browser/web_contents.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/base/mojom/dialog_button.mojom.h"
++#include "ui/views/border.h"
++#include "ui/views/bubble/bubble_dialog_delegate_view.h"
++#include "ui/views/controls/label.h"
++#include "ui/views/layout/box_layout.h"
++#include "ui/views/style/typography.h"
++#include "ui/views/view_tracker.h"
++#include "ui/views/widget/widget.h"
++
++namespace ide {
++namespace {
++
++constexpr base::TimeDelta kPollInterval = base::Milliseconds(30);
++// A quick Ctrl+Tab tap toggles without flashing the list.
++constexpr base::TimeDelta kOverlayDelay = base::Milliseconds(200);
++constexpr size_t kMaxEntries = 9;
++
++class MruOverlayContents : public views::View {
++  METADATA_HEADER(MruOverlayContents, views::View)
++
++ public:
++  MruOverlayContents(const std::vector<RowSpec>& rows, size_t selected) {
++    SetLayoutManager(std::make_unique<views::BoxLayout>(
++        views::BoxLayout::Orientation::kVertical, gfx::Insets(), 2));
++    for (size_t i = 0; i < rows.size(); ++i) {
++      rows_.push_back(AddChildView(CreateRow(rows[i], i == selected,
++                                             base::RepeatingClosure(),
++                                             base::RepeatingClosure())));
++    }
++    auto* footer = AddChildView(std::make_unique<views::Label>(
++        u"Hold ⌃, press Tab to go further back   Release ⌃ to switch",
++        views::style::CONTEXT_LABEL, views::style::STYLE_SECONDARY));
++    footer->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++    footer->SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(4, 10)));
++  }
++  MruOverlayContents(const MruOverlayContents&) = delete;
++  MruOverlayContents& operator=(const MruOverlayContents&) = delete;
++  ~MruOverlayContents() override = default;
++
++  void Select(size_t index) {
++    for (size_t i = 0; i < rows_.size(); ++i) {
++      SetRowSelected(rows_[i], i == index);
++    }
++  }
++
++ private:
++  std::vector<raw_ptr<views::View>> rows_;
++};
++
++BEGIN_METADATA(MruOverlayContents)
++END_METADATA
++
++class MruOverlayBubble : public views::BubbleDialogDelegate {
++ public:
++  MruOverlayBubble(const std::vector<RowSpec>& rows, size_t selected)
++      : views::BubbleDialogDelegate(static_cast<views::View*>(nullptr),
++                                    views::BubbleBorder::TOP_CENTER) {
++    SetButtons(static_cast<int>(ui::mojom::DialogButton::kNone));
++    SetShowCloseButton(false);
++    SetTitle(u"Recent tabs");
++    SetShowTitle(false);
++    // Focus must stay in the page so further Ctrl+Tab presses reach the
++    // browser's accelerator.
++    SetCanActivate(false);
++    set_close_on_deactivate(false);
++    set_fixed_width(kPaletteWidth - 80);
++    set_margins(gfx::Insets(8));
++    set_adjust_if_offscreen(false);
++    SetContentsView(std::make_unique<MruOverlayContents>(rows, selected));
++  }
++  MruOverlayBubble(const MruOverlayBubble&) = delete;
++  MruOverlayBubble& operator=(const MruOverlayBubble&) = delete;
++  ~MruOverlayBubble() override = default;
++
++  void Select(size_t index) {
++    if (GetWidget()) {
++      static_cast<MruOverlayContents*>(GetContentsView())->Select(index);
++    }
++  }
++};
++
++class MruSession {
++ public:
++  static MruSession& Get() {
++    static base::NoDestructor<MruSession> session;
++    return *session;
++  }
++
++  void Step(BrowserWindowInterface* browser, bool reverse) {
++    if (!active_) {
++      Begin(browser);
++      if (entries_.size() < 2) {
++        End();
++        return;
++      }
++    }
++    const size_t count = entries_.size();
++    position_ = reverse ? (position_ + count - 1) % count
++                        : (position_ + 1) % count;
++    if (MruOverlayBubble* overlay = Overlay()) {
++      overlay->Select(position_);
++    }
++    // Menu clicks and taps already released arrive with Control up.
++    if (!IsControlKeyDown()) {
++      Commit();
++    }
++  }
++
++ private:
++  struct Entry {
++    base::WeakPtr<content::WebContents> contents;
++    RowSpec row;
++  };
++
++  static Entry MakeEntry(content::WebContents* contents) {
++    Entry entry;
++    entry.contents = contents->GetWeakPtr();
++    entry.row.icon = GetFavicon(contents);
++    entry.row.title = contents->GetTitle();
++    entry.row.detail = url_formatter::FormatUrl(
++        contents->GetLastCommittedURL(),
++        url_formatter::kFormatUrlOmitDefaults |
++            url_formatter::kFormatUrlOmitHTTPS |
++            url_formatter::kFormatUrlOmitTrivialSubdomains,
++        base::UnescapeRule::SPACES, nullptr, nullptr, nullptr);
++    if (contents->IsCurrentlyAudible()) {
++      entry.row.hint = u"Playing";
++    }
++    return entry;
++  }
++
++  void Begin(BrowserWindowInterface* browser) {
++    entries_.clear();
++    position_ = 0;
++    browser_ = browser;
++    started_ = base::TimeTicks::Now();
++
++    content::WebContents* current =
++        browser->GetTabStripModel()->GetActiveWebContents();
++    std::vector<std::pair<base::Time, content::WebContents*>> others;
++    ProfileBrowserCollection::GetForProfile(browser->GetProfile())
++        ->ForEach(
++            [&](BrowserWindowInterface* candidate) {
++              if (candidate->GetType() !=
++                  BrowserWindowInterface::Type::TYPE_NORMAL) {
++                return true;
++              }
++              TabStripModel* model = candidate->GetTabStripModel();
++              for (int i = 0; i < model->count(); ++i) {
++                content::WebContents* contents = model->GetWebContentsAt(i);
++                if (contents == current) {
++                  continue;
++                }
++                auto* unit = resource_coordinator::TabLifecycleUnitExternal::
++                    FromWebContents(contents);
++                others.emplace_back(
++                    unit ? unit->GetLastFocusedTime() : base::Time(),
++                    contents);
++              }
++              return true;
++            },
++            BrowserCollection::Order::kActivation);
++    std::stable_sort(others.begin(), others.end(),
++                     [](const auto& a, const auto& b) {
++                       return a.first > b.first;
++                     });
++
++    if (current) {
++      entries_.push_back(MakeEntry(current));
++    }
++    for (const auto& [time, contents] : others) {
++      if (entries_.size() >= kMaxEntries) {
++        break;
++      }
++      entries_.push_back(MakeEntry(contents));
++    }
++    active_ = true;
++    timer_.Start(FROM_HERE, kPollInterval,
++                 base::BindRepeating(&MruSession::Poll,
++                                     base::Unretained(this)));
++  }
++
++  void Poll() {
++    if (!IsControlKeyDown()) {
++      Commit();
++      return;
++    }
++    if (!Overlay() && base::TimeTicks::Now() - started_ >= kOverlayDelay) {
++      ShowOverlay();
++    }
++  }
++
++  void ShowOverlay() {
++    BrowserView* browser_view =
++        browser_ ? BrowserView::GetBrowserViewForBrowser(browser_) : nullptr;
++    if (!browser_view || !browser_view->GetWidget()) {
++      return;
++    }
++    std::vector<RowSpec> rows;
++    for (const Entry& entry : entries_) {
++      rows.push_back(entry.row);
++    }
++    auto overlay = std::make_unique<MruOverlayBubble>(rows, position_);
++    overlay->set_parent_window(browser_view->GetWidget()->GetNativeView());
++    overlay->SetAnchorRect(GetPaletteAnchorRect(browser_));
++    overlay_.Show(std::move(overlay), /*activate=*/false);
++  }
++
++  void Commit() {
++    content::WebContents* target = position_ < entries_.size()
++                                       ? entries_[position_].contents.get()
++                                       : nullptr;
++    End();
++    if (target) {
++      ActivateContents(target);
++    }
++  }
++
++  void End() {
++    timer_.Stop();
++    active_ = false;
++    entries_.clear();
++    position_ = 0;
++    browser_ = nullptr;
++    overlay_.Close();
++  }
++
++  MruOverlayBubble* Overlay() {
++    return static_cast<MruOverlayBubble*>(overlay_.delegate());
++  }
++
++  bool active_ = false;
++  std::vector<Entry> entries_;
++  size_t position_ = 0;
++  base::TimeTicks started_;
++  // Only held while Control is down; cleared in End().
++  raw_ptr<BrowserWindowInterface> browser_ = nullptr;
++  base::RepeatingTimer timer_;
++  BubbleHolder overlay_;
++};
++
++}  // namespace
++
++#if !BUILDFLAG(IS_MAC)
++bool IsControlKeyDown() {
++  return false;
++}
++#endif
++
++void CycleMruTab(BrowserWindowInterface* browser, bool reverse) {
++  MruSession::Get().Step(browser, reverse);
++}
++
++}  // namespace ide
+diff --git a/chrome/browser/ui/views/ide/ide_palette.cc b/chrome/browser/ui/views/ide/ide_palette.cc
+new file mode 100644
+index 0000000000..b6e102cd4d
+--- /dev/null
++++ b/chrome/browser/ui/views/ide/ide_palette.cc
+@@ -0,0 +1,1000 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/ide/ide_palette.h"
++
++#include <algorithm>
++#include <memory>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "base/functional/bind.h"
++#include "base/i18n/case_conversion.h"
++#include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
++#include "base/no_destructor.h"
++#include "base/strings/escape.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_split.h"
++#include "base/strings/string_util.h"
++#include "base/task/cancelable_task_tracker.h"
++#include "base/task/sequenced_task_runner.h"
++#include "build/build_config.h"
++#include "chrome/app/chrome_command_ids.h"
++#include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
++#include "chrome/browser/history/history_service_factory.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/resource_coordinator/tab_lifecycle_unit_external.h"
++#include "chrome/browser/sessions/tab_restore_service_factory.h"
++#include "chrome/browser/ui/browser_commands.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
++#include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
++#include "chrome/browser/ui/navigator/browser_navigator.h"
++#include "chrome/browser/ui/navigator/browser_navigator_params.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "chrome/browser/ui/views/download/bubble/download_toolbar_ui_controller.h"
++#include "chrome/browser/ui/views/frame/browser_view.h"
++#include "chrome/browser/ui/views/ide/ide_internal.h"
++#include "components/favicon/content/content_favicon_driver.h"
++#include "components/history/core/browser/history_service.h"
++#include "components/history/core/browser/history_types.h"
++#include "components/keyed_service/core/service_access_type.h"
++#include "components/omnibox/browser/autocomplete_classifier.h"
++#include "components/omnibox/browser/autocomplete_match.h"
++#include "components/sessions/core/tab_restore_service.h"
++#include "components/sessions/core/tab_restore_types.h"
++#include "components/url_formatter/url_formatter.h"
++#include "components/vector_icons/vector_icons.h"
++#include "content/public/browser/web_contents.h"
++#include "third_party/metrics_proto/omnibox_event.pb.h"
++#include "ui/base/l10n/time_format.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/base/mojom/dialog_button.mojom.h"
++#include "ui/base/page_transition_types.h"
++#include "ui/base/window_open_disposition.h"
++#include "ui/color/color_id.h"
++#include "ui/events/event.h"
++#include "ui/events/keycodes/keyboard_codes.h"
++#include "ui/gfx/text_elider.h"
++#include "ui/views/accessibility/view_accessibility.h"
++#include "ui/views/background.h"
++#include "ui/views/border.h"
++#include "ui/views/bubble/bubble_dialog_delegate_view.h"
++#include "ui/views/controls/image_view.h"
++#include "ui/views/controls/label.h"
++#include "ui/views/controls/scroll_view.h"
++#include "ui/views/controls/styled_label.h"
++#include "ui/views/controls/textfield/textfield.h"
++#include "ui/views/controls/textfield/textfield_controller.h"
++#include "ui/views/layout/box_layout.h"
++#include "ui/views/style/typography.h"
++#include "ui/views/style/typography_provider.h"
++#include "ui/views/view_tracker.h"
++#include "ui/views/widget/widget.h"
++#include "url/gurl.h"
++
++namespace ide {
++
++RowSpec::RowSpec() = default;
++RowSpec::RowSpec(const RowSpec&) = default;
++RowSpec& RowSpec::operator=(const RowSpec&) = default;
++RowSpec::~RowSpec() = default;
++
++namespace {
++
++constexpr size_t kMaxTabs = 7;
++constexpr size_t kMaxHistory = 5;
++constexpr size_t kMaxClosed = 3;
++constexpr int kListMaxHeight = 470;
++constexpr int kTitleWidth = 430;
++constexpr int kRowRadius = 6;
++
++// Palette entries with no IDC equivalent.
++enum SpecialCommand {
++  kShowDownloadsBubble = -1,
++  kDownloadLocation = -2,
++  kCloseIdleTabsNow = -3,
++};
++
++struct Command {
++  const char16_t* label;
++  int id;
++};
++
++constexpr Command kCommands[] = {
++    {u"Downloads: Show List", kShowDownloadsBubble},
++    {u"Downloads: Open Full Page", IDC_SHOW_DOWNLOADS},
++    {u"Downloads: Change Location…", kDownloadLocation},
++    {u"Tab: Close", IDC_CLOSE_TAB},
++    {u"Tab: Reopen Closed Tab", IDC_RESTORE_TAB},
++    {u"Tab: Duplicate", IDC_DUPLICATE_TAB},
++    {u"Tab: Pin or Unpin (pinned tabs never auto-close)", IDC_WINDOW_PIN_TAB},
++    {u"Tab: Mute or Unmute Site", IDC_WINDOW_MUTE_SITE},
++    {u"Tab: Move to New Window", IDC_MOVE_TAB_TO_NEW_WINDOW},
++    {u"Tab: Close Other Tabs", IDC_WINDOW_CLOSE_OTHER_TABS},
++    {u"Tabs: Close Tabs Idle for 12 Hours Now", kCloseIdleTabsNow},
++    {u"Split: New Split View", IDC_NEW_SPLIT_TAB},
++    {u"Window: New Tab", IDC_NEW_TAB},
++    {u"Window: New Window", IDC_NEW_WINDOW},
++    {u"Window: New Incognito Window", IDC_NEW_INCOGNITO_WINDOW},
++    {u"Window: Close Window", IDC_CLOSE_WINDOW},
++    {u"Window: Full Screen", IDC_FULLSCREEN},
++    {u"Page: Edit URL", IDC_FOCUS_LOCATION},
++    {u"Page: Reload", IDC_RELOAD},
++    {u"Page: Hard Reload", IDC_RELOAD_BYPASSING_CACHE},
++    {u"Page: Find…", IDC_FIND},
++    {u"Page: Print…", IDC_PRINT},
++    {u"Page: Save As…", IDC_SAVE_PAGE},
++    {u"Page: Copy URL", IDC_COPY_URL},
++    {u"Page: Translate", IDC_SHOW_TRANSLATE},
++    {u"Page: Zoom In", IDC_ZOOM_PLUS},
++    {u"Page: Zoom Out", IDC_ZOOM_MINUS},
++    {u"Page: Actual Size", IDC_ZOOM_NORMAL},
++    {u"Page: View Source", IDC_VIEW_SOURCE},
++    {u"Developer: Toggle DevTools", IDC_DEV_TOOLS_TOGGLE},
++    {u"Developer: Inspect Element", IDC_DEV_TOOLS_INSPECT},
++    {u"Developer: JavaScript Console", IDC_DEV_TOOLS_CONSOLE},
++    {u"Developer: Task Manager", IDC_TASK_MANAGER},
++    {u"Browser: Settings", IDC_OPTIONS},
++    {u"Browser: Extensions", IDC_MANAGE_EXTENSIONS},
++    {u"Browser: History", IDC_SHOW_HISTORY},
++    {u"Browser: Clear Browsing Data…", IDC_CLEAR_BROWSING_DATA},
++};
++
++struct Item {
++  enum class Kind { kNewTab, kOpenTab, kHistory, kClosed, kNavigate, kCommand };
++
++  Item() = default;
++  Item(const Item&) = default;
++  Item& operator=(const Item&) = default;
++  ~Item() = default;
++
++  Kind kind = Kind::kCommand;
++  RowSpec row;
++  GURL url;
++  base::WeakPtr<content::WebContents> contents;
++  int command = 0;
++  int score = 0;
++  base::Time recency;
++};
++
++const char16_t* SectionTitle(Item::Kind kind) {
++  switch (kind) {
++    case Item::Kind::kOpenTab:
++      return u"OPEN TABS";
++    case Item::Kind::kHistory:
++      return u"HISTORY";
++    case Item::Kind::kClosed:
++      return u"RECENTLY CLOSED";
++    default:
++      return nullptr;
++  }
++}
++
++// Case-insensitive match of every whitespace-separated token of `query`; a
++// contiguous hit outranks a scattered subsequence. Returns -1 on a miss.
++int FuzzyScore(const std::u16string& query,
++               const std::u16string& text,
++               std::vector<gfx::Range>* matches) {
++  if (query.empty()) {
++    return 0;
++  }
++  const std::u16string haystack = base::i18n::ToLower(text);
++  int total = 0;
++  for (const std::u16string& token :
++       base::SplitString(base::i18n::ToLower(query), u" ",
++                         base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
++    const size_t exact = haystack.find(token);
++    if (exact != std::u16string::npos) {
++      int score = 20 + static_cast<int>(token.size()) * 6;
++      if (exact == 0 || !base::IsAsciiAlphaNumeric(haystack[exact - 1])) {
++        score += 15;
++      }
++      if (matches) {
++        matches->emplace_back(exact, exact + token.size());
++      }
++      total += score;
++      continue;
++    }
++    size_t matched = 0;
++    size_t last = std::u16string::npos;
++    int score = 0;
++    for (size_t i = 0; i < haystack.size() && matched < token.size(); ++i) {
++      if (haystack[i] != token[matched]) {
++        continue;
++      }
++      score += 1;
++      if (i == 0 || !base::IsAsciiAlphaNumeric(haystack[i - 1])) {
++        score += 6;
++      }
++      if (last != std::u16string::npos && last + 1 == i) {
++        score += 3;
++      }
++      if (matches) {
++        if (!matches->empty() && matches->back().end() == i) {
++          matches->back() = gfx::Range(matches->back().start(), i + 1);
++        } else {
++          matches->emplace_back(i, i + 1);
++        }
++      }
++      last = i;
++      ++matched;
++    }
++    if (matched < token.size()) {
++      return -1;
++    }
++    total += score;
++  }
++  return total;
++}
++
++std::u16string DisplayUrl(const GURL& url) {
++  return url_formatter::FormatUrl(
++      url,
++      url_formatter::kFormatUrlOmitDefaults |
++          url_formatter::kFormatUrlOmitHTTPS |
++          url_formatter::kFormatUrlOmitTrivialSubdomains,
++      base::UnescapeRule::SPACES, nullptr, nullptr, nullptr);
++}
++
++base::Time LastFocused(content::WebContents* contents) {
++  auto* unit =
++      resource_coordinator::TabLifecycleUnitExternal::FromWebContents(contents);
++  return unit ? unit->GetLastFocusedTime() : base::Time();
++}
++
++bool IsBrowserAlive(BrowserWindowInterface* browser) {
++  bool alive = false;
++  GlobalBrowserCollection::GetInstance()->ForEach(
++      [&](BrowserWindowInterface* candidate) {
++        alive = candidate == browser;
++        return !alive;
++      });
++  return alive;
++}
++
++void Navigate(BrowserWindowInterface* browser, const GURL& url) {
++  NavigateParams params(browser, url, ui::PAGE_TRANSITION_TYPED);
++  params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
++  ::Navigate(&params);
++}
++
++void RunCommand(BrowserWindowInterface* browser, int command) {
++  switch (command) {
++    case kShowDownloadsBubble:
++      if (auto* controller = DownloadToolbarUIController::From(browser)) {
++        controller->InvokeUI();
++      }
++      return;
++    case kDownloadLocation:
++      Navigate(browser, GURL("chrome://settings/downloads"));
++      return;
++    case kCloseIdleTabsNow:
++      CloseIdleTabs(kIdleTabLimit);
++      return;
++    default:
++      chrome::ExecuteCommand(browser, command);
++  }
++}
++
++void ActOn(BrowserWindowInterface* browser, Item item) {
++  if (!IsBrowserAlive(browser)) {
++    return;
++  }
++  switch (item.kind) {
++    case Item::Kind::kNewTab:
++      chrome::ExecuteCommand(browser, IDC_NEW_TAB);
++      return;
++    case Item::Kind::kOpenTab:
++      if (item.contents) {
++        ActivateContents(item.contents.get());
++      }
++      return;
++    case Item::Kind::kHistory:
++    case Item::Kind::kClosed:
++    case Item::Kind::kNavigate:
++      Navigate(browser, item.url);
++      return;
++    case Item::Kind::kCommand:
++      RunCommand(browser, item.command);
++      return;
++  }
++}
++
++class RowView : public views::View {
++  METADATA_HEADER(RowView, views::View)
++
++ public:
++  RowView(base::RepeatingClosure on_click, base::RepeatingClosure on_hover)
++      : on_click_(std::move(on_click)), on_hover_(std::move(on_hover)) {}
++  RowView(const RowView&) = delete;
++  RowView& operator=(const RowView&) = delete;
++  ~RowView() override = default;
++
++  bool OnMousePressed(const ui::MouseEvent& event) override {
++    return !on_click_.is_null();
++  }
++  void OnMouseReleased(const ui::MouseEvent& event) override {
++    if (on_click_ && HitTestPoint(event.location())) {
++      on_click_.Run();
++    }
++  }
++  void OnMouseEntered(const ui::MouseEvent& event) override {
++    if (on_hover_) {
++      on_hover_.Run();
++    }
++  }
++
++ private:
++  base::RepeatingClosure on_click_;
++  base::RepeatingClosure on_hover_;
++};
++
++BEGIN_METADATA(RowView)
++END_METADATA
++
++std::u16string PaletteTitle(PaletteMode mode) {
++  return mode == PaletteMode::kGoto ? u"Go to Anything" : u"Command Palette";
++}
++
++class PaletteContents : public views::View, public views::TextfieldController {
++  METADATA_HEADER(PaletteContents, views::View)
++
++ public:
++  PaletteContents(BrowserWindowInterface* browser,
++                  PaletteMode mode,
++                  base::RepeatingClosure resize)
++      : browser_(browser), mode_(mode), resize_(std::move(resize)) {
++    SetLayoutManager(std::make_unique<views::BoxLayout>(
++        views::BoxLayout::Orientation::kVertical, gfx::Insets(), 6));
++
++    input_ = AddChildView(std::make_unique<views::Textfield>());
++    input_->set_controller(this);
++    input_->SetFontList(input_->GetFontList().DeriveWithSizeDelta(4));
++    input_->SetPlaceholderText(mode == PaletteMode::kGoto
++                                   ? u"Tabs, history, URL or search"
++                                   : u"Type a command");
++    input_->GetViewAccessibility().SetName(PaletteTitle(mode));
++
++    auto* scroll = AddChildView(std::make_unique<views::ScrollView>());
++    scroll->SetHorizontalScrollBarMode(
++        views::ScrollView::ScrollBarMode::kDisabled);
++    scroll->SetDrawOverflowIndicator(false);
++    scroll->ClipHeightTo(0, kListMaxHeight);
++    list_ = scroll->SetContents(std::make_unique<views::View>());
++    list_->SetLayoutManager(std::make_unique<views::BoxLayout>(
++        views::BoxLayout::Orientation::kVertical));
++
++    footer_ = AddChildView(std::make_unique<views::Label>(
++        std::u16string(), views::style::CONTEXT_LABEL,
++        views::style::STYLE_SECONDARY));
++    footer_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++    footer_->SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(2, 6)));
++
++    Rebuild();
++  }
++  PaletteContents(const PaletteContents&) = delete;
++  PaletteContents& operator=(const PaletteContents&) = delete;
++  ~PaletteContents() override = default;
++
++  views::Textfield* input() { return input_; }
++
++  // views::TextfieldController:
++  void ContentsChanged(views::Textfield* sender,
++                       const std::u16string& new_contents) override {
++    Rebuild();
++  }
++
++  bool HandleKeyEvent(views::Textfield* sender,
++                      const ui::KeyEvent& key_event) override {
++    if (key_event.type() != ui::EventType::kKeyPressed ||
++        sender->IsIMEComposing()) {
++      return false;
++    }
++    const bool control = key_event.IsControlDown();
++    switch (key_event.key_code()) {
++      case ui::VKEY_DOWN:
++        MoveSelection(1);
++        return true;
++      case ui::VKEY_UP:
++        MoveSelection(-1);
++        return true;
++      case ui::VKEY_N:
++        if (control) {
++          MoveSelection(1);
++          return true;
++        }
++        break;
++      case ui::VKEY_P:
++        if (control) {
++          MoveSelection(-1);
++          return true;
++        }
++        break;
++      case ui::VKEY_RETURN:
++        Accept(selected_);
++        return true;
++      case ui::VKEY_ESCAPE:
++        GetWidget()->Close();
++        return true;
++      default:
++        break;
++    }
++    return false;
++  }
++
++ private:
++  std::u16string Query() const {
++    return std::u16string(
++        base::TrimWhitespace(input_->GetText(), base::TRIM_ALL));
++  }
++
++  void Rebuild() {
++    ++generation_;
++    history_tracker_.TryCancelAll();
++    history_.clear();
++    sync_items_.clear();
++    has_navigate_item_ = false;
++    navigate_first_ = false;
++    const std::u16string query = Query();
++    if (mode_ == PaletteMode::kGoto) {
++      BuildGotoItems(query);
++      if (!query.empty()) {
++        QueryHistory(query);
++      }
++    } else {
++      BuildCommandItems(query);
++    }
++    Render(/*reset_selection=*/true);
++  }
++
++  void BuildGotoItems(const std::u16string& query) {
++    Profile* profile = browser_->GetProfile();
++    content::WebContents* current =
++        browser_->GetTabStripModel()->GetActiveWebContents();
++
++    std::vector<Item> tabs;
++    tab_count_ = 0;
++    ProfileBrowserCollection::GetForProfile(profile)->ForEach(
++        [&](BrowserWindowInterface* browser) {
++          if (browser->GetType() != BrowserWindowInterface::Type::TYPE_NORMAL) {
++            return true;
++          }
++          TabStripModel* model = browser->GetTabStripModel();
++          for (int i = 0; i < model->count(); ++i) {
++            content::WebContents* contents = model->GetWebContentsAt(i);
++            ++tab_count_;
++            if (contents == current) {
++              continue;
++            }
++            Item item;
++            item.kind = Item::Kind::kOpenTab;
++            item.row.title = contents->GetTitle();
++            item.url = contents->GetLastCommittedURL();
++            item.row.detail = DisplayUrl(item.url);
++            if (!Score(query, &item)) {
++              continue;
++            }
++            item.row.icon = GetFavicon(contents);
++            if (contents->IsCurrentlyAudible()) {
++              item.row.hint = u"Playing";
++            }
++            item.contents = contents->GetWeakPtr();
++            item.recency = LastFocused(contents);
++            tabs.push_back(std::move(item));
++          }
++          return true;
++        },
++        BrowserCollection::Order::kActivation);
++    SortAndTrim(&tabs, query.empty() ? kMaxTabs + 3 : kMaxTabs);
++
++    std::vector<Item> closed;
++    if (auto* restore = TabRestoreServiceFactory::GetForProfile(profile)) {
++      const base::Time now = base::Time::Now();
++      for (const auto& entry : restore->entries()) {
++        if (entry->type != sessions::tab_restore::TAB) {
++          continue;
++        }
++        const auto& tab = static_cast<const sessions::tab_restore::Tab&>(*entry);
++        if (tab.navigations.empty()) {
++          continue;
++        }
++        const auto& navigation =
++            tab.navigations[tab.normalized_navigation_index()];
++        Item item;
++        item.kind = Item::Kind::kClosed;
++        item.url = navigation.virtual_url();
++        item.row.title = navigation.title().empty()
++                             ? DisplayUrl(item.url)
++                             : navigation.title();
++        item.row.detail = DisplayUrl(item.url);
++        if (!Score(query, &item)) {
++          continue;
++        }
++        item.row.icon = ui::ImageModel::FromVectorIcon(
++            vector_icons::kHistoryIcon, ui::kColorIcon, 16);
++        item.row.hint =
++            ui::TimeFormat::Simple(ui::TimeFormat::FORMAT_ELAPSED,
++                                   ui::TimeFormat::LENGTH_SHORT,
++                                   now - entry->timestamp);
++        item.recency = entry->timestamp;
++        closed.push_back(std::move(item));
++      }
++    }
++    SortAndTrim(&closed, kMaxClosed);
++
++    if (query.empty()) {
++      Item new_tab;
++      new_tab.kind = Item::Kind::kNewTab;
++      new_tab.row.title = u"New Tab";
++      new_tab.row.icon = ui::ImageModel::FromVectorIcon(
++          vector_icons::kSearchIcon, ui::kColorIcon, 16);
++      new_tab.row.hint = u"↵";
++      sync_items_.push_back(std::move(new_tab));
++    } else {
++      AutocompleteMatch match;
++      AutocompleteClassifierFactory::GetForProfile(profile)->Classify(
++          query, false, false, metrics::OmniboxEventProto::INVALID_SPEC, &match,
++          nullptr);
++      if (match.destination_url.is_valid()) {
++        const bool is_search = AutocompleteMatch::IsSearchType(match.type);
++        navigate_item_ = Item();
++        navigate_item_.kind = Item::Kind::kNavigate;
++        navigate_item_.url = match.destination_url;
++        navigate_item_.row.title =
++            is_search ? u"Search for “" + query + u"”"
++                      : u"Open " + DisplayUrl(match.destination_url);
++        navigate_item_.row.icon = ui::ImageModel::FromVectorIcon(
++            is_search ? vector_icons::kSearchIcon : vector_icons::kGlobeIcon,
++            ui::kColorIcon, 16);
++        navigate_item_.row.hint = u"New tab";
++        has_navigate_item_ = true;
++        navigate_first_ = !is_search;
++      } else {
++        has_navigate_item_ = false;
++      }
++    }
++
++    for (Item& item : tabs) {
++      sync_items_.push_back(std::move(item));
++    }
++    closed_ = std::move(closed);
++  }
++
++  void BuildCommandItems(const std::u16string& query) {
++    has_navigate_item_ = false;
++    closed_.clear();
++    std::vector<Item> commands;
++    for (const Command& command : kCommands) {
++      if (command.id > 0 && !chrome::IsCommandEnabled(browser_, command.id)) {
++        continue;
++      }
++      Item item;
++      item.kind = Item::Kind::kCommand;
++      item.command = command.id;
++      item.row.title = command.label;
++      item.score = FuzzyScore(query, item.row.title, &item.row.title_matches);
++      if (item.score < 0) {
++        continue;
++      }
++      if (command.id > 0) {
++        item.row.hint = ShortcutForCommand(command.id);
++      }
++      commands.push_back(std::move(item));
++    }
++    std::stable_sort(commands.begin(), commands.end(),
++                     [](const Item& a, const Item& b) {
++                       return a.score > b.score;
++                     });
++    sync_items_ = std::move(commands);
++  }
++
++  // Scores `item` against its title and URL; false drops it.
++  bool Score(const std::u16string& query, Item* item) {
++    std::vector<gfx::Range> title_matches;
++    const int title_score =
++        FuzzyScore(query, item->row.title, &title_matches);
++    const int url_score = FuzzyScore(query, item->row.detail, nullptr);
++    if (title_score < 0 && url_score < 0) {
++      return false;
++    }
++    if (title_score >= url_score) {
++      item->row.title_matches = std::move(title_matches);
++    }
++    item->score = std::max(title_score, url_score);
++    return true;
++  }
++
++  static void SortAndTrim(std::vector<Item>* items, size_t max) {
++    std::stable_sort(items->begin(), items->end(),
++                     [](const Item& a, const Item& b) {
++                       if (a.score != b.score) {
++                         return a.score > b.score;
++                       }
++                       return a.recency > b.recency;
++                     });
++    if (items->size() > max) {
++      items->resize(max);
++    }
++  }
++
++  void QueryHistory(const std::u16string& query) {
++    history::HistoryService* history = HistoryServiceFactory::GetForProfile(
++        browser_->GetProfile(), ServiceAccessType::EXPLICIT_ACCESS);
++    if (!history) {
++      return;
++    }
++    history::QueryOptions options;
++    options.max_count = 40;
++    options.duplicate_policy = history::QueryOptions::REMOVE_ALL_DUPLICATES;
++    history->QueryHistory(
++        query, options,
++        base::BindOnce(&PaletteContents::OnHistoryResults,
++                       weak_factory_.GetWeakPtr(), generation_, query),
++        &history_tracker_);
++  }
++
++  void OnHistoryResults(int generation,
++                        std::u16string query,
++                        history::QueryResults results) {
++    if (generation != generation_) {
++      return;
++    }
++    std::vector<Item> history;
++    for (const history::URLResult& result : results) {
++      Item item;
++      item.kind = Item::Kind::kHistory;
++      item.url = result.url();
++      if (IsAlreadyListed(item.url)) {
++        continue;
++      }
++      item.row.title =
++          result.title().empty() ? DisplayUrl(item.url) : result.title();
++      item.row.detail = DisplayUrl(item.url);
++      if (!Score(query, &item)) {
++        continue;
++      }
++      item.row.icon = ui::ImageModel::FromVectorIcon(
++          vector_icons::kHistoryIcon, ui::kColorIcon, 16);
++      item.recency = result.visit_time();
++      history.push_back(std::move(item));
++    }
++    SortAndTrim(&history, kMaxHistory);
++    history_ = std::move(history);
++    Render(/*reset_selection=*/false);
++  }
++
++  bool IsAlreadyListed(const GURL& url) const {
++    for (const Item& item : sync_items_) {
++      if (item.url == url) {
++        return true;
++      }
++    }
++    for (const Item& item : closed_) {
++      if (item.url == url) {
++        return true;
++      }
++    }
++    return false;
++  }
++
++  void Render(bool reset_selection) {
++    shown_.clear();
++    if (navigate_first_ && has_navigate_item_) {
++      shown_.push_back(navigate_item_);
++    }
++    for (const Item& item : sync_items_) {
++      shown_.push_back(item);
++    }
++    for (const Item& item : history_) {
++      shown_.push_back(item);
++    }
++    for (const Item& item : closed_) {
++      shown_.push_back(item);
++    }
++    if (!navigate_first_ && has_navigate_item_) {
++      shown_.push_back(navigate_item_);
++    }
++    if (reset_selection || selected_ >= shown_.size()) {
++      selected_ = 0;
++    }
++
++    rows_.clear();
++    list_->RemoveAllChildViews();
++    const char16_t* last_section = nullptr;
++    for (size_t i = 0; i < shown_.size(); ++i) {
++      const char16_t* section = SectionTitle(shown_[i].kind);
++      if (section && section != last_section) {
++        list_->AddChildView(CreateSectionHeader(section));
++      }
++      last_section = section;
++      rows_.push_back(list_->AddChildView(CreateRow(
++          shown_[i].row, i == selected_,
++          base::BindRepeating(&PaletteContents::Accept, base::Unretained(this),
++                              i),
++          base::BindRepeating(&PaletteContents::Select, base::Unretained(this),
++                              i))));
++    }
++    if (shown_.empty()) {
++      list_->AddChildView(CreateSectionHeader(u"No matches"));
++    }
++
++    footer_->SetText(
++        mode_ == PaletteMode::kGoto
++            ? u"↑↓ select   ↵ open   esc close   ⌘⇧P commands   " +
++                  base::NumberToString16(tab_count_) + u" tabs open"
++            : u"↑↓ select   ↵ run   esc close   ⌘T tabs and URLs");
++    list_->InvalidateLayout();
++    resize_.Run();
++    if (selected_ < rows_.size()) {
++      rows_[selected_]->ScrollViewToVisible();
++    }
++  }
++
++  void Select(size_t index) {
++    if (index >= rows_.size() || index == selected_) {
++      return;
++    }
++    if (selected_ < rows_.size()) {
++      SetRowSelected(rows_[selected_], false);
++    }
++    selected_ = index;
++    SetRowSelected(rows_[selected_], true);
++    rows_[selected_]->ScrollViewToVisible();
++  }
++
++  void MoveSelection(int delta) {
++    if (rows_.empty()) {
++      return;
++    }
++    const int count = static_cast<int>(rows_.size());
++    Select(static_cast<size_t>(
++        (static_cast<int>(selected_) + delta + count) % count));
++  }
++
++  void Accept(size_t index) {
++    if (index >= shown_.size()) {
++      return;
++    }
++    // Run after the bubble has gone so focus restoration cannot undo what the
++    // action focuses (find bar, location bar, a new tab).
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE, base::BindOnce(&ActOn, base::Unretained(browser_.get()),
++                                  shown_[index]));
++    GetWidget()->Close();
++  }
++
++  raw_ptr<BrowserWindowInterface> browser_;
++  const PaletteMode mode_;
++  base::RepeatingClosure resize_;
++  raw_ptr<views::Textfield> input_ = nullptr;
++  raw_ptr<views::View> list_ = nullptr;
++  raw_ptr<views::Label> footer_ = nullptr;
++  std::vector<raw_ptr<views::View>> rows_;
++  std::vector<Item> sync_items_;
++  std::vector<Item> closed_;
++  std::vector<Item> history_;
++  std::vector<Item> shown_;
++  Item navigate_item_;
++  bool has_navigate_item_ = false;
++  bool navigate_first_ = false;
++  size_t selected_ = 0;
++  int tab_count_ = 0;
++  int generation_ = 0;
++  base::CancelableTaskTracker history_tracker_;
++  base::WeakPtrFactory<PaletteContents> weak_factory_{this};
++};
++
++BEGIN_METADATA(PaletteContents)
++END_METADATA
++
++class PaletteBubble : public views::BubbleDialogDelegate {
++ public:
++  PaletteBubble(BrowserWindowInterface* browser, PaletteMode mode)
++      : views::BubbleDialogDelegate(static_cast<views::View*>(nullptr),
++                                    views::BubbleBorder::TOP_CENTER) {
++    SetButtons(static_cast<int>(ui::mojom::DialogButton::kNone));
++    SetShowCloseButton(false);
++    SetTitle(PaletteTitle(mode));
++    SetShowTitle(false);
++    set_fixed_width(kPaletteWidth);
++    set_margins(gfx::Insets(8));
++    set_adjust_if_offscreen(false);
++    auto* contents = SetContentsView(std::make_unique<PaletteContents>(
++        browser, mode,
++        base::BindRepeating(&PaletteBubble::Resize, base::Unretained(this))));
++    SetInitiallyFocusedView(contents->input());
++  }
++  PaletteBubble(const PaletteBubble&) = delete;
++  PaletteBubble& operator=(const PaletteBubble&) = delete;
++  ~PaletteBubble() override = default;
++
++ private:
++  void Resize() {
++    if (GetWidget()) {
++      SizeToContents();
++    }
++  }
++};
++
++BubbleHolder& PaletteHolder() {
++  static base::NoDestructor<BubbleHolder> holder;
++  return *holder;
++}
++
++}  // namespace
++
++BubbleHolder::BubbleHolder() = default;
++BubbleHolder::~BubbleHolder() = default;
++
++void BubbleHolder::Show(std::unique_ptr<views::BubbleDialogDelegate> delegate,
++                        bool activate) {
++  Close();
++  delegate_ = std::move(delegate);
++  widget_ = views::BubbleDialogDelegate::CreateBubble(
++      delegate_.get(), base::BindOnce(&BubbleHolder::OnClosed,
++                                      weak_factory_.GetWeakPtr(),
++                                      ++generation_));
++  if (activate) {
++    widget_->Show();
++  } else {
++    widget_->ShowInactive();
++  }
++}
++
++void BubbleHolder::Close() {
++  if (widget_ && !widget_->IsClosed()) {
++    widget_->CloseWithReason(views::Widget::ClosedReason::kUnspecified);
++  }
++  OnClosed(generation_, views::Widget::ClosedReason::kUnspecified);
++}
++
++void BubbleHolder::OnClosed(int generation,
++                            views::Widget::ClosedReason reason) {
++  if (generation != generation_) {
++    return;
++  }
++  // The delegate must outlive its widget, so it is queued second.
++  auto runner = base::SequencedTaskRunner::GetCurrentDefault();
++  if (widget_) {
++    runner->DeleteSoon(FROM_HERE, std::move(widget_));
++  }
++  if (delegate_) {
++    runner->DeleteSoon(FROM_HERE, std::move(delegate_));
++  }
++}
++
++#if !BUILDFLAG(IS_MAC)
++std::u16string ShortcutForCommand(int command) {
++  return std::u16string();
++}
++#endif
++
++std::unique_ptr<views::View> CreateRow(const RowSpec& spec,
++                                       bool selected,
++                                       base::RepeatingClosure on_click,
++                                       base::RepeatingClosure on_hover) {
++  auto row =
++      std::make_unique<RowView>(std::move(on_click), std::move(on_hover));
++  auto* layout = row->SetLayoutManager(std::make_unique<views::BoxLayout>(
++      views::BoxLayout::Orientation::kHorizontal, gfx::Insets::VH(6, 10), 10));
++  layout->set_cross_axis_alignment(
++      views::BoxLayout::CrossAxisAlignment::kCenter);
++
++  auto* icon = row->AddChildView(std::make_unique<views::ImageView>());
++  icon->SetImageSize(gfx::Size(16, 16));
++  icon->SetPreferredSize(gfx::Size(16, 16));
++  if (!spec.icon.IsEmpty()) {
++    icon->SetImage(spec.icon);
++  }
++
++  auto* text = row->AddChildView(std::make_unique<views::View>());
++  text->SetLayoutManager(std::make_unique<views::BoxLayout>(
++      views::BoxLayout::Orientation::kVertical, gfx::Insets(), 1));
++  layout->SetFlexForView(text, 1);
++
++  // Pre-elided so the styled title stays on one line; StyledLabel wraps
++  // instead of eliding.
++  const gfx::FontList& font = views::TypographyProvider::Get().GetFont(
++      views::style::CONTEXT_LABEL, views::style::STYLE_PRIMARY);
++  const std::u16string title =
++      gfx::ElideText(spec.title, font, kTitleWidth, gfx::ELIDE_TAIL);
++  auto* title_label = text->AddChildView(std::make_unique<views::StyledLabel>());
++  title_label->SetText(title);
++  for (const gfx::Range& range : spec.title_matches) {
++    const gfx::Range clipped(std::min<size_t>(range.start(), title.size()),
++                             std::min<size_t>(range.end(), title.size()));
++    if (clipped.is_empty()) {
++      continue;
++    }
++    views::StyledLabel::RangeStyleInfo style;
++    style.text_style = views::style::STYLE_EMPHASIZED;
++    title_label->AddStyleRange(clipped, style);
++  }
++  title_label->SizeToFit(0);
++
++  if (!spec.detail.empty()) {
++    auto* detail = text->AddChildView(std::make_unique<views::Label>(
++        spec.detail, views::style::CONTEXT_LABEL,
++        views::style::STYLE_SECONDARY));
++    detail->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++    detail->SetElideBehavior(gfx::ELIDE_TAIL);
++    detail->SetMaximumWidthSingleLine(kTitleWidth);
++  }
++
++  if (!spec.hint.empty()) {
++    row->AddChildView(std::make_unique<views::Label>(
++        spec.hint, views::style::CONTEXT_LABEL,
++        views::style::STYLE_SECONDARY));
++  }
++
++  SetRowSelected(row.get(), selected);
++  return row;
++}
++
++void SetRowSelected(views::View* row, bool selected) {
++  row->SetBackground(selected ? views::CreateRoundedRectBackground(
++                                    ui::kColorMenuItemBackgroundSelected,
++                                    kRowRadius)
++                              : nullptr);
++}
++
++std::unique_ptr<views::View> CreateSectionHeader(const std::u16string& text) {
++  auto label = std::make_unique<views::Label>(
++      text, views::style::CONTEXT_LABEL, views::style::STYLE_SECONDARY);
++  label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++  label->SetBorder(views::CreateEmptyBorder(gfx::Insets::TLBR(8, 10, 2, 10)));
++  return label;
++}
++
++gfx::Rect GetPaletteAnchorRect(BrowserWindowInterface* browser) {
++  const gfx::Rect bounds =
++      BrowserView::GetBrowserViewForBrowser(browser)->GetBoundsInScreen();
++  return gfx::Rect(bounds.CenterPoint().x(), bounds.y() + 72, 0, 0);
++}
++
++ui::ImageModel GetFavicon(content::WebContents* contents) {
++  if (auto* driver =
++          favicon::ContentFaviconDriver::FromWebContents(contents)) {
++    const gfx::Image image = driver->GetFavicon();
++    if (!image.IsEmpty()) {
++      return ui::ImageModel::FromImage(image);
++    }
++  }
++  return ui::ImageModel::FromVectorIcon(vector_icons::kGlobeIcon,
++                                        ui::kColorIcon, 16);
++}
++
++bool ActivateContents(content::WebContents* contents) {
++  bool found = false;
++  GlobalBrowserCollection::GetInstance()->ForEach(
++      [&](BrowserWindowInterface* browser) {
++        TabStripModel* model = browser->GetTabStripModel();
++        const int index = model->GetIndexOfWebContents(contents);
++        if (index == TabStripModel::kNoTab) {
++          return true;
++        }
++        browser->GetWindow()->Activate();
++        model->ActivateTabAt(index);
++        found = true;
++        return false;
++      });
++  return found;
++}
++
++void ShowPalette(BrowserWindowInterface* browser, PaletteMode mode) {
++  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
++  if (!browser_view || !browser_view->GetWidget()) {
++    return;
++  }
++  auto palette = std::make_unique<PaletteBubble>(browser, mode);
++  palette->set_parent_window(browser_view->GetWidget()->GetNativeView());
++  palette->SetAnchorRect(GetPaletteAnchorRect(browser));
++  PaletteHolder().Show(std::move(palette), /*activate=*/true);
++}
++
++}  // namespace ide
+diff --git a/chrome/browser/ui/views/ide/ide_palette.h b/chrome/browser/ui/views/ide/ide_palette.h
+new file mode 100644
+index 0000000000..a8a01c93e3
+--- /dev/null
++++ b/chrome/browser/ui/views/ide/ide_palette.h
+@@ -0,0 +1,27 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_IDE_IDE_PALETTE_H_
++#define CHROME_BROWSER_UI_VIEWS_IDE_IDE_PALETTE_H_
++
++class BrowserWindowInterface;
++
++// With no tab strip, tabs are reached only from these entry points; no views
++// types here so BrowserCommandController can include it.
++namespace ide {
++
++enum class PaletteMode { kGoto, kCommands };
++
++void ShowPalette(BrowserWindowInterface* browser, PaletteMode mode);
++
++// Steps through tabs in most-recently-used order while Control is held and
++// activates the chosen tab when Control is released.
++void CycleMruTab(BrowserWindowInterface* browser, bool reverse);
++
++// Idempotent; called once the browser process has started.
++void StartIdleTabCloser();
++
++}  // namespace ide
++
++#endif  // CHROME_BROWSER_UI_VIEWS_IDE_IDE_PALETTE_H_
+diff --git a/chrome/browser/ui/views/omnibox/omnibox_view_views.cc b/chrome/browser/ui/views/omnibox/omnibox_view_views.cc
+index 6ac205d996..5be9f70d69 100644
+--- a/chrome/browser/ui/views/omnibox/omnibox_view_views.cc
++++ b/chrome/browser/ui/views/omnibox/omnibox_view_views.cc
+@@ -284,6 +284,8 @@ void OmniboxViewViews::Init() {
+   set_controller(this);
+   SetTextInputType(GetPreferredTextInputType());
+   GetRenderText()->SetElideBehavior(gfx::ELIDE_TAIL);
++  // The URL reads as a centred title until focused for editing.
++  SetHorizontalAlignment(gfx::ALIGN_CENTER);
+   GetRenderText()->set_symmetric_selection_visual_bounds(true);
+   InstallPlaceholderText();
+   scoped_template_url_service_observation_.Observe(
+@@ -1729,6 +1731,7 @@ bool OmniboxViewViews::HandleAccessibleAction(
+ 
+ void OmniboxViewViews::OnFocus() {
+   views::Textfield::OnFocus();
++  SetHorizontalAlignment(gfx::ALIGN_LEFT);
+ 
+   // TODO(oshima): Get control key state.
+   controller()->edit_model()->OnSetFocus(false);
+@@ -1776,6 +1779,7 @@ void OmniboxViewViews::OnFocus() {
+ 
+ void OmniboxViewViews::OnBlur() {
+   views::Textfield::OnBlur();
++  SetHorizontalAlignment(gfx::ALIGN_CENTER);
+   is_user_initiated_focus_ = false;
+ 
+   views::FocusManager* focus_manager = GetFocusManager();
+diff --git a/chrome/browser/ui/views/toolbar/pinned_toolbar_actions_container.cc b/chrome/browser/ui/views/toolbar/pinned_toolbar_actions_container.cc
+index c61d5d0352..4f61230bbc 100644
+--- a/chrome/browser/ui/views/toolbar/pinned_toolbar_actions_container.cc
++++ b/chrome/browser/ui/views/toolbar/pinned_toolbar_actions_container.cc
+@@ -169,6 +169,8 @@ PinnedToolbarActionsContainer::PinnedToolbarActionsContainer(
+           GetLayoutConstant(LayoutConstant::kToolbarDividerSpacing) -
+               GetLayoutConstant(LayoutConstant::kToolbarIconDefaultMargin),
+           0, GetLayoutConstant(LayoutConstant::kToolbarDividerSpacing)));
++  // The avatar and app menu it separates the pinned buttons from are hidden.
++  toolbar_divider->SetVisible(false);
+   toolbar_divider_ = AddChildView(std::move(toolbar_divider));
+ 
+   // Initialize the pinned action buttons.
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.cc b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+index f9bb38f923..492a1d9443 100644
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+@@ -611,9 +611,8 @@ void ToolbarView::Init() {
+ 
+   if (!features::IsWebUIAvatarButtonEnabled()) {
+     avatar_ = AddChildView(std::make_unique<AvatarToolbarButton>(browser_));
+-    bool show_avatar_toolbar_button =
+-        AvatarToolbarButtonInterface::CanShowForProfile(browser_->GetProfile());
+-    avatar_->SetVisible(show_avatar_toolbar_button);
++    // Single-profile minimal toolbar: profiles stay reachable from the menu bar.
++    avatar_->SetVisible(false);
+   }
+ 
+   // Only manage the overflow button when there are at least some views
+@@ -635,6 +634,9 @@ void ToolbarView::Init() {
+         l10n_util::GetStringUTF16(IDS_APPMENU_TOOLTIP));
+     app_menu_button->SetID(VIEW_ID_APP_MENU);
+     app_menu_button_ = AddChildView(std::move(app_menu_button));
++    // Kept as an anchor for bubbles; commands live in the menu bar and the
++    // Cmd+Shift+P palette.
++    app_menu_button_->SetVisible(false);
+   }
+ 
+   if (base::FeatureList::IsEnabled(contextual_tasks::kContextualTasks) &&
+diff --git a/components/bookmarks/browser/bookmark_utils.cc b/components/bookmarks/browser/bookmark_utils.cc
+index d8f32a1ca6..4f6fb3d69e 100644
+--- a/components/bookmarks/browser/bookmark_utils.cc
++++ b/components/bookmarks/browser/bookmark_utils.cc
+@@ -457,9 +457,9 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
+   // `kShowBookmarkBar` set to false.
+   registry->RegisterIntegerPref(
+       prefs::kBookmarkBarVisibilityState,
+-      static_cast<int>(BookmarkBarVisibilityState::kOnlyShowOnNtp),
++      static_cast<int>(BookmarkBarVisibilityState::kAlwaysHide),
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+-  registry->RegisterBooleanPref(prefs::kEditBookmarksEnabled, true);
++  registry->RegisterBooleanPref(prefs::kEditBookmarksEnabled, false);
+   registry->RegisterBooleanPref(
+       prefs::kShowAppsShortcutInBookmarkBar, false,
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+diff --git a/components/password_manager/core/browser/password_manager.cc b/components/password_manager/core/browser/password_manager.cc
+index 89cdfdee32..4597e29c4c 100644
+--- a/components/password_manager/core/browser/password_manager.cc
++++ b/components/password_manager/core/browser/password_manager.cc
+@@ -549,7 +549,7 @@ PasswordForm CreateFormForLeakCheck(const PasswordForm& pending_credentials,
+ void PasswordManager::RegisterProfilePrefs(
+     user_prefs::PrefRegistrySyncable* registry) {
+   registry->RegisterBooleanPref(
+-      prefs::kCredentialsEnableService, true,
++      prefs::kCredentialsEnableService, false,
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
+   registry->RegisterBooleanPref(
+       prefs::kCredentialsEnableAutosignin, true,

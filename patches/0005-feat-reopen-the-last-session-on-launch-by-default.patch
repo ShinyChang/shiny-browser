@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shiny <owner@shinychang.net>
+Date: Mon, 26 Oct 2026 00:27:04 +0800
+Subject: [PATCH] feat: reopen the last session on launch by default
+
+Shiny is used like an editor, which reopens its files; a profile can still
+pick another startup option in settings.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
+---
+ chrome/browser/prefs/session_startup_pref.cc | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/chrome/browser/prefs/session_startup_pref.cc b/chrome/browser/prefs/session_startup_pref.cc
+index 0159cee9db..4f500016e2 100644
+--- a/chrome/browser/prefs/session_startup_pref.cc
++++ b/chrome/browser/prefs/session_startup_pref.cc
+@@ -71,7 +71,8 @@ SessionStartupPref::Type SessionStartupPref::GetDefaultStartupType() {
+     return SessionStartupPref::LAST;
+   }
+ #endif
+-  return SessionStartupPref::DEFAULT;
++  // Shiny reopens the last session on launch, like an editor reopens its files.
++  return SessionStartupPref::LAST;
+ #endif
+ }
+ 

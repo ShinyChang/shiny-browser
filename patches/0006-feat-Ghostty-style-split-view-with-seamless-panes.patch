@@ -1,0 +1,1025 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shiny <owner@shinychang.net>
+Date: Mon, 26 Oct 2026 00:27:07 +0800
+Subject: [PATCH] feat: Ghostty-style split view with seamless panes
+
+- Cmd+D splits right and Shift+Cmd+D splits down (they no longer bookmark);
+  Split Left and Split Up are in the File menu and the command palette.
+  Chromium splits hold two tabs, so splitting a split only re-orients it.
+- Cmd+Opt+arrows select the pane in that direction and fall back to the
+  previous or next tab, or focus pane, when there is none. Keyboard focus
+  moves with the pane, since BrowserView restores focus only outside a split.
+- Cmd+Ctrl+arrows move the divider, Cmd+Ctrl+= evens it, Cmd+W closes the
+  active pane; Swap Panes and Exit Split View are palette commands.
+- In a split, Go to Anything opens tabs, URLs and history in the active
+  pane; the tab it replaces stays open unless it is the split new-tab page.
+- Panes are drawn edge to edge like a single tab: no inset, padding,
+  outline, mini toolbar or divider gap. Web contents cover anything drawn
+  over them, so the divider is resized from the keyboard only.
+- smoke.mjs: 8 split checks, 30 in total.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
+---
+ chrome/app/chrome_command_ids.h               |  13 ++
+ .../browser/global_keyboard_shortcuts_mac.mm  |   4 -
+ chrome/browser/ui/BUILD.gn                    |   1 +
+ chrome/browser/ui/actions/chrome_action_id.h  |  13 ++
+ chrome/browser/ui/browser_actions.cc          |  29 +++
+ .../browser/ui/browser_command_controller.cc  |  34 +++
+ chrome/browser/ui/cocoa/accelerators_cocoa.mm |  23 +-
+ chrome/browser/ui/cocoa/main_menu_builder.mm  |  88 +++++++
+ .../ui/views/frame/contents_container_view.cc |  10 +-
+ .../ui/views/frame/multi_contents_view.cc     |  42 +++-
+ .../ui/views/frame/multi_contents_view.h      |   5 +-
+ chrome/browser/ui/views/ide/ide_internal.h    |  10 +
+ chrome/browser/ui/views/ide/ide_palette.cc    |  43 +++-
+ chrome/browser/ui/views/ide/ide_palette.h     |   4 +
+ chrome/browser/ui/views/ide/ide_split.cc      | 215 ++++++++++++++++++
+ chrome/browser/ui/views/ide/smoke.mjs         | 127 ++++++++++-
+ 16 files changed, 632 insertions(+), 29 deletions(-)
+ create mode 100644 chrome/browser/ui/views/ide/ide_split.cc
+
+diff --git a/chrome/app/chrome_command_ids.h b/chrome/app/chrome_command_ids.h
+index c252c1dabc..2402024ed6 100644
+--- a/chrome/app/chrome_command_ids.h
++++ b/chrome/app/chrome_command_ids.h
+@@ -61,6 +61,19 @@
+ #define IDC_CYCLE_TO_PREV_TAB           34063
+ #define IDC_IDE_GOTO_ANYTHING           34090
+ #define IDC_IDE_COMMAND_PALETTE         34091
++#define IDC_IDE_SPLIT_RIGHT             34109
++#define IDC_IDE_SPLIT_DOWN              34110
++#define IDC_IDE_SPLIT_LEFT              34111
++#define IDC_IDE_SPLIT_UP                34112
++#define IDC_IDE_FOCUS_PANE_LEFT         34113
++#define IDC_IDE_FOCUS_PANE_RIGHT        34114
++#define IDC_IDE_FOCUS_PANE_UP           34115
++#define IDC_IDE_FOCUS_PANE_DOWN         34116
++#define IDC_IDE_RESIZE_PANE_LEFT        34117
++#define IDC_IDE_RESIZE_PANE_RIGHT       34118
++#define IDC_IDE_RESIZE_PANE_UP          34119
++#define IDC_IDE_RESIZE_PANE_DOWN        34120
++#define IDC_IDE_EQUALIZE_PANES          34121
+ #define IDC_SELECT_TAB_0                34018
+ #define IDC_SELECT_TAB_1                34019
+ #define IDC_SELECT_TAB_2                34020
+diff --git a/chrome/browser/global_keyboard_shortcuts_mac.mm b/chrome/browser/global_keyboard_shortcuts_mac.mm
+index 1bbe4c5fab..5798f0c856 100644
+--- a/chrome/browser/global_keyboard_shortcuts_mac.mm
++++ b/chrome/browser/global_keyboard_shortcuts_mac.mm
+@@ -118,8 +118,6 @@ CommandForKeyEventResult ShortcutCommand(int cmd) {
+       {true,  true,  false, false, kVK_ANSI_LeftBracket,  IDC_SELECT_PREVIOUS_TAB},
+       {false, false, true,  false, kVK_PageDown,          IDC_SELECT_NEXT_TAB},
+       {false, false, true,  false, kVK_PageUp,            IDC_SELECT_PREVIOUS_TAB},
+-      {true,  false, false, true,  kVK_RightArrow,        IDC_SELECT_NEXT_TAB},
+-      {true,  false, false, true,  kVK_LeftArrow,         IDC_SELECT_PREVIOUS_TAB},
+       {false, true,  true,  false, kVK_PageDown,          IDC_MOVE_TAB_NEXT},
+       {false, true,  true,  false, kVK_PageUp,            IDC_MOVE_TAB_PREVIOUS},
+ 
+@@ -147,8 +145,6 @@ CommandForKeyEventResult ShortcutCommand(int cmd) {
+       {true,  false, false, true,  kVK_ANSI_L,            IDC_SHOW_DOWNLOADS},
+       {true,  true,  false, false, kVK_ANSI_C,            IDC_DEV_TOOLS_INSPECT},
+       {true,  false, false, true,  kVK_ANSI_C,            IDC_DEV_TOOLS_INSPECT},
+-      {true,  false, false, true,  kVK_DownArrow,         IDC_FOCUS_NEXT_PANE},
+-      {true,  false, false, true,  kVK_UpArrow,           IDC_FOCUS_PREVIOUS_PANE},
+       {true,  true,  false, true,  kVK_ANSI_A,            IDC_FOCUS_INACTIVE_POPUP_FOR_ACCESSIBILITY},
+       {true,  false, false, true,  kVK_ANSI_R,            IDC_SHOW_READING_MODE_KEYBOARD},
+     });
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index fbd5514d58..0a3f05b705 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -3541,6 +3541,7 @@ static_library("ui") {
+       "views/ide/ide_mru.cc",
+       "views/ide/ide_palette.cc",
+       "views/ide/ide_palette.h",
++      "views/ide/ide_split.cc",
+     ]
+     if (is_mac) {
+       sources += [ "views/ide/ide_mac.mm" ]
+diff --git a/chrome/browser/ui/actions/chrome_action_id.h b/chrome/browser/ui/actions/chrome_action_id.h
+index b3b3b2f82e..9c100da32a 100644
+--- a/chrome/browser/ui/actions/chrome_action_id.h
++++ b/chrome/browser/ui/actions/chrome_action_id.h
+@@ -39,6 +39,19 @@
+   E(kActionCycleToPrevTab, IDC_CYCLE_TO_PREV_TAB) \
+   E(kActionIdeGotoAnything, IDC_IDE_GOTO_ANYTHING) \
+   E(kActionIdeCommandPalette, IDC_IDE_COMMAND_PALETTE) \
++  E(kActionIdeSplitRight, IDC_IDE_SPLIT_RIGHT) \
++  E(kActionIdeSplitDown, IDC_IDE_SPLIT_DOWN) \
++  E(kActionIdeSplitLeft, IDC_IDE_SPLIT_LEFT) \
++  E(kActionIdeSplitUp, IDC_IDE_SPLIT_UP) \
++  E(kActionIdeFocusPaneLeft, IDC_IDE_FOCUS_PANE_LEFT) \
++  E(kActionIdeFocusPaneRight, IDC_IDE_FOCUS_PANE_RIGHT) \
++  E(kActionIdeFocusPaneUp, IDC_IDE_FOCUS_PANE_UP) \
++  E(kActionIdeFocusPaneDown, IDC_IDE_FOCUS_PANE_DOWN) \
++  E(kActionIdeResizePaneLeft, IDC_IDE_RESIZE_PANE_LEFT) \
++  E(kActionIdeResizePaneRight, IDC_IDE_RESIZE_PANE_RIGHT) \
++  E(kActionIdeResizePaneUp, IDC_IDE_RESIZE_PANE_UP) \
++  E(kActionIdeResizePaneDown, IDC_IDE_RESIZE_PANE_DOWN) \
++  E(kActionIdeEqualizePanes, IDC_IDE_EQUALIZE_PANES) \
+   E(kActionSelectTab0, IDC_SELECT_TAB_0) \
+   E(kActionSelectTab1, IDC_SELECT_TAB_1) \
+   E(kActionSelectTab2, IDC_SELECT_TAB_2) \
+diff --git a/chrome/browser/ui/browser_actions.cc b/chrome/browser/ui/browser_actions.cc
+index 6098e9aaf7..603b1ea9d1 100644
+--- a/chrome/browser/ui/browser_actions.cc
++++ b/chrome/browser/ui/browser_actions.cc
+@@ -3116,6 +3116,35 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
+           .SetActionId(kActionIdeCommandPalette)
+           .Build());
+ 
++  for (const auto& [action_id, command_id] :
++       std::initializer_list<std::pair<actions::ActionId, int>>{
++           {kActionIdeSplitRight, IDC_IDE_SPLIT_RIGHT},
++           {kActionIdeSplitDown, IDC_IDE_SPLIT_DOWN},
++           {kActionIdeSplitLeft, IDC_IDE_SPLIT_LEFT},
++           {kActionIdeSplitUp, IDC_IDE_SPLIT_UP},
++           {kActionIdeFocusPaneLeft, IDC_IDE_FOCUS_PANE_LEFT},
++           {kActionIdeFocusPaneRight, IDC_IDE_FOCUS_PANE_RIGHT},
++           {kActionIdeFocusPaneUp, IDC_IDE_FOCUS_PANE_UP},
++           {kActionIdeFocusPaneDown, IDC_IDE_FOCUS_PANE_DOWN},
++           {kActionIdeResizePaneLeft, IDC_IDE_RESIZE_PANE_LEFT},
++           {kActionIdeResizePaneRight, IDC_IDE_RESIZE_PANE_RIGHT},
++           {kActionIdeResizePaneUp, IDC_IDE_RESIZE_PANE_UP},
++           {kActionIdeResizePaneDown, IDC_IDE_RESIZE_PANE_DOWN},
++           {kActionIdeEqualizePanes, IDC_IDE_EQUALIZE_PANES},
++       }) {
++    root_action_item_->AddChild(
++        actions::ActionItem::Builder(
++            base::BindRepeating(
++                [](BrowserWindowInterface* bwi, int command_id,
++                   actions::ActionItem* item,
++                   actions::ActionInvocationContext context) {
++                  ide::RunSplitCommand(bwi, command_id);
++                },
++                bwi, command_id))
++            .SetActionId(action_id)
++            .Build());
++  }
++
+   root_action_item_->AddChild(
+       actions::ActionItem::Builder(
+           base::BindRepeating(
+diff --git a/chrome/browser/ui/browser_command_controller.cc b/chrome/browser/ui/browser_command_controller.cc
+index 58a15f65d2..297b68b046 100644
+--- a/chrome/browser/ui/browser_command_controller.cc
++++ b/chrome/browser/ui/browser_command_controller.cc
+@@ -768,6 +768,21 @@ void BrowserCommandController::HandleCommandWithDisposition(
+     case IDC_IDE_COMMAND_PALETTE:
+       ide::ShowPalette(browser_, ide::PaletteMode::kCommands);
+       break;
++    case IDC_IDE_SPLIT_RIGHT:
++    case IDC_IDE_SPLIT_DOWN:
++    case IDC_IDE_SPLIT_LEFT:
++    case IDC_IDE_SPLIT_UP:
++    case IDC_IDE_FOCUS_PANE_LEFT:
++    case IDC_IDE_FOCUS_PANE_RIGHT:
++    case IDC_IDE_FOCUS_PANE_UP:
++    case IDC_IDE_FOCUS_PANE_DOWN:
++    case IDC_IDE_RESIZE_PANE_LEFT:
++    case IDC_IDE_RESIZE_PANE_RIGHT:
++    case IDC_IDE_RESIZE_PANE_UP:
++    case IDC_IDE_RESIZE_PANE_DOWN:
++    case IDC_IDE_EQUALIZE_PANES:
++      ide::RunSplitCommand(browser_, id);
++      break;
+     case IDC_CLOSE_TAB:
+       base::RecordAction(base::UserMetricsAction("CloseTabByKey"));
+       CloseTab(browser_);
+@@ -2777,6 +2792,25 @@ void BrowserCommandController::UpdateCommandsForTabStripStateChanged() {
+   command_updater_->UpdateCommandEnabled(
+       IDC_NEW_SPLIT_TAB,
+       browser_->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL);
++  for (int command : {
++        IDC_IDE_SPLIT_RIGHT,
++        IDC_IDE_SPLIT_DOWN,
++        IDC_IDE_SPLIT_LEFT,
++        IDC_IDE_SPLIT_UP,
++        IDC_IDE_FOCUS_PANE_LEFT,
++        IDC_IDE_FOCUS_PANE_RIGHT,
++        IDC_IDE_FOCUS_PANE_UP,
++        IDC_IDE_FOCUS_PANE_DOWN,
++        IDC_IDE_RESIZE_PANE_LEFT,
++        IDC_IDE_RESIZE_PANE_RIGHT,
++        IDC_IDE_RESIZE_PANE_UP,
++        IDC_IDE_RESIZE_PANE_DOWN,
++        IDC_IDE_EQUALIZE_PANES,
++       }) {
++    command_updater_->UpdateCommandEnabled(
++        command,
++        browser_->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL);
++  }
+   command_updater_->UpdateCommandEnabled(IDC_GROUP_UNGROUPED_TABS,
+                                          CanGroupAllUngroupedTabs(browser_));
+ 
+diff --git a/chrome/browser/ui/cocoa/accelerators_cocoa.mm b/chrome/browser/ui/cocoa/accelerators_cocoa.mm
+index bb4be6f05a..c760b7d6f0 100644
+--- a/chrome/browser/ui/cocoa/accelerators_cocoa.mm
++++ b/chrome/browser/ui/cocoa/accelerators_cocoa.mm
+@@ -53,7 +53,6 @@
+      ui::VKEY_B},
+     {IDC_SHOW_BOOKMARK_MANAGER, ui::EF_COMMAND_DOWN | ui::EF_ALT_DOWN,
+      ui::VKEY_B},
+-    {IDC_BOOKMARK_THIS_TAB, ui::EF_COMMAND_DOWN, ui::VKEY_D},
+     {IDC_SHOW_DOWNLOADS, ui::EF_COMMAND_DOWN | ui::EF_SHIFT_DOWN, ui::VKEY_J},
+     {IDC_SHOW_HISTORY, ui::EF_COMMAND_DOWN, ui::VKEY_Y},
+     {IDC_VIEW_SOURCE, ui::EF_COMMAND_DOWN | ui::EF_ALT_DOWN, ui::VKEY_U},
+@@ -101,8 +100,6 @@
+     {IDC_HOME, ui::EF_COMMAND_DOWN | ui::EF_SHIFT_DOWN, ui::VKEY_H},
+     {IDC_BACK, ui::EF_COMMAND_DOWN, ui::VKEY_OEM_4},
+     {IDC_FORWARD, ui::EF_COMMAND_DOWN, ui::VKEY_OEM_6},
+-    {IDC_BOOKMARK_ALL_TABS, ui::EF_COMMAND_DOWN | ui::EF_SHIFT_DOWN,
+-     ui::VKEY_D},
+     {IDC_MINIMIZE_WINDOW, ui::EF_COMMAND_DOWN, ui::VKEY_M},
+     {IDC_CYCLE_TO_NEXT_TAB, ui::EF_CONTROL_DOWN, ui::VKEY_TAB},
+     {IDC_CYCLE_TO_PREV_TAB, ui::EF_CONTROL_DOWN | ui::EF_SHIFT_DOWN,
+@@ -119,6 +116,26 @@
+     {IDC_TOGGLE_VERTICAL_TABS_COLLAPSE, ui::EF_COMMAND_DOWN | ui::EF_SHIFT_DOWN,
+      ui::VKEY_L},
+     {IDC_NEW_SPLIT_TAB, ui::EF_COMMAND_DOWN | ui::EF_ALT_DOWN, ui::VKEY_N},
++    // Ghostty's split keys; Cmd+D and Cmd+Shift+D used to bookmark.
++    {IDC_IDE_SPLIT_RIGHT, ui::EF_COMMAND_DOWN, ui::VKEY_D},
++    {IDC_IDE_SPLIT_DOWN, ui::EF_COMMAND_DOWN | ui::EF_SHIFT_DOWN, ui::VKEY_D},
++    {IDC_IDE_FOCUS_PANE_LEFT, ui::EF_COMMAND_DOWN | ui::EF_ALT_DOWN,
++     ui::VKEY_LEFT},
++    {IDC_IDE_FOCUS_PANE_RIGHT, ui::EF_COMMAND_DOWN | ui::EF_ALT_DOWN,
++     ui::VKEY_RIGHT},
++    {IDC_IDE_FOCUS_PANE_UP, ui::EF_COMMAND_DOWN | ui::EF_ALT_DOWN, ui::VKEY_UP},
++    {IDC_IDE_FOCUS_PANE_DOWN, ui::EF_COMMAND_DOWN | ui::EF_ALT_DOWN,
++     ui::VKEY_DOWN},
++    {IDC_IDE_RESIZE_PANE_LEFT, ui::EF_COMMAND_DOWN | ui::EF_CONTROL_DOWN,
++     ui::VKEY_LEFT},
++    {IDC_IDE_RESIZE_PANE_RIGHT, ui::EF_COMMAND_DOWN | ui::EF_CONTROL_DOWN,
++     ui::VKEY_RIGHT},
++    {IDC_IDE_RESIZE_PANE_UP, ui::EF_COMMAND_DOWN | ui::EF_CONTROL_DOWN,
++     ui::VKEY_UP},
++    {IDC_IDE_RESIZE_PANE_DOWN, ui::EF_COMMAND_DOWN | ui::EF_CONTROL_DOWN,
++     ui::VKEY_DOWN},
++    {IDC_IDE_EQUALIZE_PANES, ui::EF_COMMAND_DOWN | ui::EF_CONTROL_DOWN,
++     ui::VKEY_OEM_PLUS},
+ };
+ 
+ ui::Accelerator AcceleratorForCloseWindow() {
+diff --git a/chrome/browser/ui/cocoa/main_menu_builder.mm b/chrome/browser/ui/cocoa/main_menu_builder.mm
+index 1ce16ccf5d..6f43dbc3a7 100644
+--- a/chrome/browser/ui/cocoa/main_menu_builder.mm
++++ b/chrome/browser/ui/cocoa/main_menu_builder.mm
+@@ -110,6 +110,10 @@
+   return item;
+ }
+ 
++// Tags for the File menu's split submenus, which run no command themselves.
++constexpr int kSelectSplitMenuTag = 1;
++constexpr int kResizeSplitMenuTag = 2;
++
+ NSMenuItem* BuildFileMenu(NSApplication* nsapp,
+                           id app_delegate,
+                           const std::u16string& product_name,
+@@ -148,6 +152,64 @@
+               Item(IDS_OPEN_LOCATION_MAC)
+                   .command_id(IDC_FOCUS_LOCATION)
+                   .remove_if(is_pwa),
++              Item().is_separator()
++                  .remove_if(is_pwa),
++              Item(IDS_NEW_TAB_MAC)
++                  .command_id(IDC_IDE_SPLIT_RIGHT)
++                  .sf_symbol(@"rectangle.righthalf.inset.filled")
++                  .remove_if(is_pwa),
++              Item(IDS_NEW_TAB_MAC)
++                  .command_id(IDC_IDE_SPLIT_LEFT)
++                  .sf_symbol(@"rectangle.lefthalf.inset.filled")
++                  .remove_if(is_pwa),
++              Item(IDS_NEW_TAB_MAC)
++                  .command_id(IDC_IDE_SPLIT_DOWN)
++                  .sf_symbol(@"rectangle.bottomhalf.inset.filled")
++                  .remove_if(is_pwa),
++              Item(IDS_NEW_TAB_MAC)
++                  .command_id(IDC_IDE_SPLIT_UP)
++                  .sf_symbol(@"rectangle.tophalf.inset.filled")
++                  .remove_if(is_pwa),
++              Item(IDS_NEW_TAB_MAC)
++                  .tag(kSelectSplitMenuTag)
++                  .sf_symbol(@"rectangle.split.2x1")
++                  .remove_if(is_pwa)
++                  .submenu({
++                      Item(IDS_NEW_TAB_MAC)
++                          .command_id(IDC_IDE_FOCUS_PANE_UP)
++                          .sf_symbol(@"arrow.up"),
++                      Item(IDS_NEW_TAB_MAC)
++                          .command_id(IDC_IDE_FOCUS_PANE_DOWN)
++                          .sf_symbol(@"arrow.down"),
++                      Item(IDS_NEW_TAB_MAC)
++                          .command_id(IDC_IDE_FOCUS_PANE_LEFT)
++                          .sf_symbol(@"arrow.left"),
++                      Item(IDS_NEW_TAB_MAC)
++                          .command_id(IDC_IDE_FOCUS_PANE_RIGHT)
++                          .sf_symbol(@"arrow.right"),
++                  }),
++              Item(IDS_NEW_TAB_MAC)
++                  .tag(kResizeSplitMenuTag)
++                  .sf_symbol(@"arrow.left.and.right")
++                  .remove_if(is_pwa)
++                  .submenu({
++                      Item(IDS_NEW_TAB_MAC)
++                          .command_id(IDC_IDE_EQUALIZE_PANES)
++                          .sf_symbol(@"equal"),
++                      Item().is_separator(),
++                      Item(IDS_NEW_TAB_MAC)
++                          .command_id(IDC_IDE_RESIZE_PANE_UP)
++                          .sf_symbol(@"arrow.up.to.line"),
++                      Item(IDS_NEW_TAB_MAC)
++                          .command_id(IDC_IDE_RESIZE_PANE_DOWN)
++                          .sf_symbol(@"arrow.down.to.line"),
++                      Item(IDS_NEW_TAB_MAC)
++                          .command_id(IDC_IDE_RESIZE_PANE_LEFT)
++                          .sf_symbol(@"arrow.left.to.line"),
++                      Item(IDS_NEW_TAB_MAC)
++                          .command_id(IDC_IDE_RESIZE_PANE_RIGHT)
++                          .sf_symbol(@"arrow.right.to.line"),
++                  }),
+               Item().is_separator(),
+               Item(IDS_CLOSE_WINDOW_MAC)
+                   .tag(IDC_CLOSE_WINDOW)
+@@ -180,6 +242,32 @@
+   [item.submenu itemWithTag:IDC_IDE_GOTO_ANYTHING].title = @"Go to Anything…";
+   [item.submenu itemWithTag:IDC_IDE_COMMAND_PALETTE].title =
+       @"Command Palette…";
++  [item.submenu itemWithTag:IDC_IDE_SPLIT_RIGHT].title = @"Split Right";
++  [item.submenu itemWithTag:IDC_IDE_SPLIT_LEFT].title = @"Split Left";
++  [item.submenu itemWithTag:IDC_IDE_SPLIT_DOWN].title = @"Split Down";
++  [item.submenu itemWithTag:IDC_IDE_SPLIT_UP].title = @"Split Up";
++  NSMenuItem* select_split = [item.submenu itemWithTag:kSelectSplitMenuTag];
++  select_split.title = @"Select Split";
++  [select_split.submenu itemWithTag:IDC_IDE_FOCUS_PANE_UP].title =
++      @"Select Split Above";
++  [select_split.submenu itemWithTag:IDC_IDE_FOCUS_PANE_DOWN].title =
++      @"Select Split Below";
++  [select_split.submenu itemWithTag:IDC_IDE_FOCUS_PANE_LEFT].title =
++      @"Select Split Left";
++  [select_split.submenu itemWithTag:IDC_IDE_FOCUS_PANE_RIGHT].title =
++      @"Select Split Right";
++  NSMenuItem* resize_split = [item.submenu itemWithTag:kResizeSplitMenuTag];
++  resize_split.title = @"Resize Split";
++  [resize_split.submenu itemWithTag:IDC_IDE_EQUALIZE_PANES].title =
++      @"Equalize Splits";
++  [resize_split.submenu itemWithTag:IDC_IDE_RESIZE_PANE_UP].title =
++      @"Move Divider Up";
++  [resize_split.submenu itemWithTag:IDC_IDE_RESIZE_PANE_DOWN].title =
++      @"Move Divider Down";
++  [resize_split.submenu itemWithTag:IDC_IDE_RESIZE_PANE_LEFT].title =
++      @"Move Divider Left";
++  [resize_split.submenu itemWithTag:IDC_IDE_RESIZE_PANE_RIGHT].title =
++      @"Move Divider Right";
+ 
+   return item;
+ }
+diff --git a/chrome/browser/ui/views/frame/contents_container_view.cc b/chrome/browser/ui/views/frame/contents_container_view.cc
+index febd158b3d..94a2b3cb0c 100644
+--- a/chrome/browser/ui/views/frame/contents_container_view.cc
++++ b/chrome/browser/ui/views/frame/contents_container_view.cc
+@@ -54,7 +54,6 @@
+ #endif
+ 
+ namespace {
+-constexpr int kSplitViewContentPadding = 4;
+ constexpr int kNewTabFooterSeparatorHeight = 1;
+ constexpr int kNewTabFooterHeight = 56;
+ }  // namespace
+@@ -215,15 +214,12 @@ void ContentsContainerView::UpdateBorderAndOverlay(bool is_in_split,
+     }
+   } else {
+     if (split_changed) {
+-      SetBorder(views::CreateEmptyBorder(gfx::Insets(
+-          kSplitViewContentPadding + ContentsContainerOutline::kThickness)));
+       UpdateBorderRoundedCorners();
+     }
+ 
+-    container_outline_->UpdateState(is_active, is_highlighted);
+-    // Mini toolbar should only be visible for the inactive contents
+-    // container view or both depending on configuration.
+-    mini_toolbar_->UpdateState(is_active, is_highlighted);
++    // Shiny shows no seam between split panes, so no outline or mini toolbar.
++    container_outline_->SetVisible(false);
++    mini_toolbar_->SetVisible(false);
+     if (capture_contents_border_view_) {
+       capture_contents_border_view_->SetIsInSplit(true);
+     }
+diff --git a/chrome/browser/ui/views/frame/multi_contents_view.cc b/chrome/browser/ui/views/frame/multi_contents_view.cc
+index a756f076ff..cbdb93f7fc 100644
+--- a/chrome/browser/ui/views/frame/multi_contents_view.cc
++++ b/chrome/browser/ui/views/frame/multi_contents_view.cc
+@@ -5,6 +5,7 @@
+ #include "chrome/browser/ui/views/frame/multi_contents_view.h"
+ 
+ #include <algorithm>
++#include <array>
+ #include <cstdlib>
+ 
+ #include "base/check_deref.h"
+@@ -231,6 +232,8 @@ void MultiContentsView::SetBackgroundRadii(const gfx::RoundedCornersF& radii) {
+     GetActiveContentsContainerView()->SetRoundedCorners(radii);
+     GetInactiveContentsContainerView()->SetRoundedCorners(
+         gfx::RoundedCornersF());
++  } else {
++    UpdateContentsBorderAndOverlay();
+   }
+ }
+ 
+@@ -350,6 +353,8 @@ void MultiContentsView::UpdateSplitVisualData(
+ 
+   visual_data_ = visual_data;
+   resize_area_->SetLayout(visual_data.split_layout());
++  // Which window corners each pane covers depends on the orientation.
++  UpdateContentsBorderAndOverlay();
+   InvalidateLayout();
+ }
+ 
+@@ -659,15 +664,26 @@ gfx::Rect MultiContentsView::CalculateSeparatorLayouts(
+     const gfx::Rect& available_space,
+     views::ProposedLayout::ChildLayoutList& child_layouts) const {
+   if (IsInSplitView()) {
+-    child_layouts.emplace_back(contents_separators_.top_separator.get(), false,
+-                               gfx::Rect());
++    // With no inset around the panes, they keep the toolbar separator a single
++    // tab has, so splitting does not shift the page.
++    const int top_height =
++        contents_separators_.should_show_top
++            ? contents_separators_.top_separator->GetPreferredSize().height()
++            : 0;
++    child_layouts.emplace_back(
++        contents_separators_.top_separator.get(),
++        contents_separators_.should_show_top,
++        gfx::Rect(available_space.origin(),
++                  {available_space.width(), top_height}));
+     child_layouts.emplace_back(contents_separators_.leading_separator.get(),
+                                false, gfx::Rect());
+     child_layouts.emplace_back(contents_separators_.trailing_separator.get(),
+                                false, gfx::Rect());
+     child_layouts.emplace_back(contents_separators_.corner_separator.get(),
+                                false, gfx::Rect());
+-    return available_space;
++    gfx::Rect below_separator = available_space;
++    below_separator.Inset(gfx::Insets().set_top(top_height));
++    return below_separator;
+   }
+ 
+   const int width = available_space.width();
+@@ -741,9 +757,9 @@ MultiContentsView::ViewSizes MultiContentsView::GetViewSizes(
+   if (IsInSplitView()) {
+     CHECK(contents_container_views_[0]->GetVisible() &&
+           contents_container_views_[1]->GetVisible());
+-    sizes.resize = GetSplitLayout() == split_tabs::SplitTabLayout::kSideBySide
+-                       ? resize_area_->GetPreferredSize().width()
+-                       : resize_area_->GetPreferredSize().height();
++    // No gap between the panes: web contents would cover any divider drawn
++    // over them, so resizing is left to the keyboard.
++    sizes.resize = 0;
+     sizes.start = std::round(visual_data_.split_ratio() *
+                              (available_size - sizes.resize));
+     sizes.end = available_size - sizes.start - sizes.resize;
+@@ -796,12 +812,22 @@ int MultiContentsView::GetMinViewSize(gfx::Rect available_space) const {
+ 
+ void MultiContentsView::UpdateContentsBorderAndOverlay() {
+   const bool is_in_split = IsInSplitView();
+-  for (auto& contents_container_view : contents_container_views_) {
++  // Panes touch each other, so each rounds only the window corners it covers.
++  const gfx::RoundedCornersF& window = GetBackgroundRadii();
++  const bool side_by_side =
++      GetSplitLayout() == split_tabs::SplitTabLayout::kSideBySide;
++  const std::array<gfx::RoundedCornersF, 2> split_radii = {
++      side_by_side ? gfx::RoundedCornersF(0, 0, 0, window.lower_left())
++                   : gfx::RoundedCornersF(),
++      gfx::RoundedCornersF(0, 0, window.lower_right(),
++                           side_by_side ? 0 : window.lower_left())};
++  for (size_t i = 0; i < contents_container_views_.size(); ++i) {
++    auto& contents_container_view = contents_container_views_[i];
+     const bool is_active =
+         contents_container_view->contents_view() == GetActiveContentsView();
+     contents_container_view->SetRoundedCorners(
+         is_in_split
+-            ? kSplitViewContentRoundedCorners
++            ? split_radii[i]
+             : (is_active ? GetBackgroundRadii() : gfx::RoundedCornersF()));
+     contents_container_view->UpdateBorderAndOverlay(
+         is_in_split, is_active, is_active && active_contents_view_highlighted_);
+diff --git a/chrome/browser/ui/views/frame/multi_contents_view.h b/chrome/browser/ui/views/frame/multi_contents_view.h
+index e39f000c2a..a2edcef34d 100644
+--- a/chrome/browser/ui/views/frame/multi_contents_view.h
++++ b/chrome/browser/ui/views/frame/multi_contents_view.h
+@@ -64,8 +64,9 @@ class MultiContentsView
+     int end = 0;
+   };
+ 
+-  static constexpr int kSplitViewContentInset = 8;
+-  static constexpr float kSplitViewContentCornerRadius = 6;
++  // Shiny draws split panes edge to edge, the way a single tab is drawn.
++  static constexpr int kSplitViewContentInset = 0;
++  static constexpr float kSplitViewContentCornerRadius = 0;
+   static constexpr gfx::RoundedCornersF kSplitViewContentRoundedCorners{
+       kSplitViewContentCornerRadius};
+ 
+diff --git a/chrome/browser/ui/views/ide/ide_internal.h b/chrome/browser/ui/views/ide/ide_internal.h
+index b112aaf6ca..4152c4dff8 100644
+--- a/chrome/browser/ui/views/ide/ide_internal.h
++++ b/chrome/browser/ui/views/ide/ide_internal.h
+@@ -95,6 +95,16 @@ int CloseIdleTabs(base::TimeDelta idle);
+ // delivered to the browser while web content has focus.
+ bool IsControlKeyDown();
+ 
++bool IsSplit(BrowserWindowInterface* browser);
++void SwapPanes(BrowserWindowInterface* browser);
++void ExitSplit(BrowserWindowInterface* browser);
++
++// Puts `contents`, a tab of `browser`, into the active pane so picking it
++// does not leave the split; false when there is no split or the tab is
++// split or pinned itself.
++bool ShowInActivePane(BrowserWindowInterface* browser,
++                      content::WebContents* contents);
++
+ // Empty when the command has no keyboard shortcut.
+ std::u16string ShortcutForCommand(int command);
+ 
+diff --git a/chrome/browser/ui/views/ide/ide_palette.cc b/chrome/browser/ui/views/ide/ide_palette.cc
+index b6e102cd4d..0090110543 100644
+--- a/chrome/browser/ui/views/ide/ide_palette.cc
++++ b/chrome/browser/ui/views/ide/ide_palette.cc
+@@ -38,6 +38,7 @@
+ #include "chrome/browser/ui/views/download/bubble/download_toolbar_ui_controller.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "chrome/browser/ui/views/ide/ide_internal.h"
++#include "chrome/common/webui_url_constants.h"
+ #include "components/favicon/content/content_favicon_driver.h"
+ #include "components/history/core/browser/history_service.h"
+ #include "components/history/core/browser/history_types.h"
+@@ -98,6 +99,8 @@ enum SpecialCommand {
+   kShowDownloadsBubble = -1,
+   kDownloadLocation = -2,
+   kCloseIdleTabsNow = -3,
++  kSwapPanes = -4,
++  kExitSplit = -5,
+ };
+ 
+ struct Command {
+@@ -117,7 +120,13 @@ constexpr Command kCommands[] = {
+     {u"Tab: Move to New Window", IDC_MOVE_TAB_TO_NEW_WINDOW},
+     {u"Tab: Close Other Tabs", IDC_WINDOW_CLOSE_OTHER_TABS},
+     {u"Tabs: Close Tabs Idle for 12 Hours Now", kCloseIdleTabsNow},
+-    {u"Split: New Split View", IDC_NEW_SPLIT_TAB},
++    {u"Split: Split Right", IDC_IDE_SPLIT_RIGHT},
++    {u"Split: Split Left", IDC_IDE_SPLIT_LEFT},
++    {u"Split: Split Down", IDC_IDE_SPLIT_DOWN},
++    {u"Split: Split Up", IDC_IDE_SPLIT_UP},
++    {u"Split: Swap Panes", kSwapPanes},
++    {u"Split: Equalize Panes", IDC_IDE_EQUALIZE_PANES},
++    {u"Split: Exit Split View", kExitSplit},
+     {u"Window: New Tab", IDC_NEW_TAB},
+     {u"Window: New Window", IDC_NEW_WINDOW},
+     {u"Window: New Incognito Window", IDC_NEW_INCOGNITO_WINDOW},
+@@ -257,10 +266,22 @@ bool IsBrowserAlive(BrowserWindowInterface* browser) {
+   return alive;
+ }
+ 
++bool NeedsSplit(int command) {
++  return command == kSwapPanes || command == kExitSplit ||
++         command == IDC_IDE_EQUALIZE_PANES;
++}
++
+ void Navigate(BrowserWindowInterface* browser, const GURL& url) {
+   NavigateParams params(browser, url, ui::PAGE_TRANSITION_TYPED);
+-  params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
++  // A foreground tab would leave the split, so the new tab takes over the
++  // active pane instead.
++  const bool in_split = IsSplit(browser);
++  params.disposition = in_split ? WindowOpenDisposition::NEW_BACKGROUND_TAB
++                                : WindowOpenDisposition::NEW_FOREGROUND_TAB;
+   ::Navigate(&params);
++  if (in_split && params.navigated_or_inserted_contents) {
++    ShowInActivePane(browser, params.navigated_or_inserted_contents);
++  }
+ }
+ 
+ void RunCommand(BrowserWindowInterface* browser, int command) {
+@@ -276,6 +297,12 @@ void RunCommand(BrowserWindowInterface* browser, int command) {
+     case kCloseIdleTabsNow:
+       CloseIdleTabs(kIdleTabLimit);
+       return;
++    case kSwapPanes:
++      SwapPanes(browser);
++      return;
++    case kExitSplit:
++      ExitSplit(browser);
++      return;
+     default:
+       chrome::ExecuteCommand(browser, command);
+   }
+@@ -287,10 +314,15 @@ void ActOn(BrowserWindowInterface* browser, Item item) {
+   }
+   switch (item.kind) {
+     case Item::Kind::kNewTab:
+-      chrome::ExecuteCommand(browser, IDC_NEW_TAB);
++      if (IsSplit(browser)) {
++        Navigate(browser, GURL(chrome::kChromeUINewTabURL));
++      } else {
++        chrome::ExecuteCommand(browser, IDC_NEW_TAB);
++      }
+       return;
+     case Item::Kind::kOpenTab:
+-      if (item.contents) {
++      if (item.contents &&
++          !ShowInActivePane(browser, item.contents.get())) {
+         ActivateContents(item.contents.get());
+       }
+       return;
+@@ -573,6 +605,9 @@ class PaletteContents : public views::View, public views::TextfieldController {
+       if (command.id > 0 && !chrome::IsCommandEnabled(browser_, command.id)) {
+         continue;
+       }
++      if (NeedsSplit(command.id) && !IsSplit(browser_)) {
++        continue;
++      }
+       Item item;
+       item.kind = Item::Kind::kCommand;
+       item.command = command.id;
+diff --git a/chrome/browser/ui/views/ide/ide_palette.h b/chrome/browser/ui/views/ide/ide_palette.h
+index a8a01c93e3..dcee59aa45 100644
+--- a/chrome/browser/ui/views/ide/ide_palette.h
++++ b/chrome/browser/ui/views/ide/ide_palette.h
+@@ -19,6 +19,10 @@ void ShowPalette(BrowserWindowInterface* browser, PaletteMode mode);
+ // activates the chosen tab when Control is released.
+ void CycleMruTab(BrowserWindowInterface* browser, bool reverse);
+ 
++// Runs one of the IDC_IDE_SPLIT_* / FOCUS_PANE_* / RESIZE_PANE_* /
++// EQUALIZE_PANES commands on the active tab's split.
++void RunSplitCommand(BrowserWindowInterface* browser, int command_id);
++
+ // Idempotent; called once the browser process has started.
+ void StartIdleTabCloser();
+ 
+diff --git a/chrome/browser/ui/views/ide/ide_split.cc b/chrome/browser/ui/views/ide/ide_split.cc
+new file mode 100644
+index 0000000000..e766899006
+--- /dev/null
++++ b/chrome/browser/ui/views/ide/ide_split.cc
+@@ -0,0 +1,215 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include <algorithm>
++#include <vector>
++
++#include "chrome/app/chrome_command_ids.h"
++#include "chrome/browser/ui/browser_commands.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/tabs/split_tab_metrics.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "chrome/browser/ui/tabs/tab_strip_user_gesture_details.h"
++#include "chrome/browser/ui/views/frame/browser_view.h"
++#include "chrome/browser/ui/views/ide/ide_internal.h"
++#include "chrome/browser/ui/views/ide/ide_palette.h"
++#include "chrome/common/webui_url_constants.h"
++#include "components/split_tabs/split_tab_visual_data.h"
++#include "components/tabs/public/split_tab_data.h"
++#include "components/tabs/public/tab_interface.h"
++#include "content/public/browser/web_contents.h"
++#include "content/public/common/url_constants.h"
++#include "ui/views/controls/webview/webview.h"
++#include "url/gurl.h"
++
++namespace ide {
++
++namespace {
++
++using split_tabs::SplitTabLayout;
++
++enum class Direction { kLeft, kRight, kUp, kDown };
++
++constexpr double kResizeStep = 0.05;
++// The view enforces its own minimum pane size; this only keeps the stored
++// ratio from drifting so far past it that resizing back seems dead.
++constexpr double kMinRatio = 0.1;
++
++SplitTabLayout LayoutFor(Direction direction) {
++  return direction == Direction::kLeft || direction == Direction::kRight
++             ? SplitTabLayout::kSideBySide
++             : SplitTabLayout::kStacked;
++}
++
++// The first tab of a split is drawn on the left or on top.
++bool TowardsEnd(Direction direction) {
++  return direction == Direction::kRight || direction == Direction::kDown;
++}
++
++split_tabs::SplitTabData* ActiveSplit(TabStripModel* model) {
++  tabs::TabInterface* active = model->GetActiveTab();
++  if (!active || !active->IsSplit()) {
++    return nullptr;
++  }
++  return model->GetSplitData(*active->GetSplit());
++}
++
++// A split holds exactly two tabs, so splitting again only re-orients it.
++void Split(BrowserWindowInterface* browser, Direction direction) {
++  TabStripModel* model = browser->GetTabStripModel();
++  if (split_tabs::SplitTabData* split = ActiveSplit(model)) {
++    if (split->visual_data()->split_layout() != LayoutFor(direction)) {
++      model->UpdateSplitLayout(split->id(), LayoutFor(direction));
++    }
++    return;
++  }
++  chrome::NewSplitTab(browser, LayoutFor(direction),
++                      split_tabs::SplitTabCreatedSource::kKeyboardShortcut);
++  // NewSplitTab puts the new pane at the end.
++  if (!TowardsEnd(direction)) {
++    if (split_tabs::SplitTabData* split = ActiveSplit(model)) {
++      model->ReverseTabsInSplit(split->id());
++    }
++  }
++}
++
++// False when no pane lies in `direction`.
++bool FocusPane(BrowserWindowInterface* browser, Direction direction) {
++  TabStripModel* model = browser->GetTabStripModel();
++  split_tabs::SplitTabData* split = ActiveSplit(model);
++  if (!split || split->visual_data()->split_layout() != LayoutFor(direction)) {
++    return false;
++  }
++  const std::vector<tabs::TabInterface*> tabs = split->ListTabs();
++  tabs::TabInterface* target =
++      TowardsEnd(direction) ? tabs.back() : tabs.front();
++  if (target->IsActivated()) {
++    return false;
++  }
++  model->ActivateTabAt(
++      model->GetIndexOfTab(target),
++      TabStripUserGestureDetails(
++          TabStripUserGestureDetails::GestureType::kKeyboard));
++  // BrowserView leaves focus alone on a tab change inside a split, because a
++  // click on the pane has already moved it; from the keyboard nothing has.
++  if (BrowserView* view = BrowserView::GetBrowserViewForBrowser(browser)) {
++    view->GetActiveContentsWebView()->RequestFocus();
++  }
++  return true;
++}
++
++// Moves the divider towards `direction`, whichever pane is active.
++void ResizePane(TabStripModel* model, Direction direction) {
++  split_tabs::SplitTabData* split = ActiveSplit(model);
++  if (!split || split->visual_data()->split_layout() != LayoutFor(direction)) {
++    return;
++  }
++  const double step = TowardsEnd(direction) ? kResizeStep : -kResizeStep;
++  model->UpdateSplitRatio(
++      split->id(), std::clamp(split->visual_data()->split_ratio() + step,
++                              kMinRatio, 1 - kMinRatio));
++}
++
++// Pages a pane shows until the user picks something; replacing one should
++// close it rather than leave it behind as a tab.
++bool IsPlaceholderPage(content::WebContents* contents) {
++  const GURL& url = contents->GetVisibleURL();
++  return url == GURL(chrome::kChromeUISplitViewNewTabPageURL) ||
++         (url.SchemeIs(content::kChromeUIScheme) &&
++          (url.host() == chrome::kChromeUINewTabHost ||
++           url.host() == chrome::kChromeUINewTabPageHost));
++}
++
++}  // namespace
++
++void RunSplitCommand(BrowserWindowInterface* browser, int command_id) {
++  TabStripModel* model = browser->GetTabStripModel();
++  if (!model->GetActiveTab()) {
++    return;
++  }
++  switch (command_id) {
++    case IDC_IDE_SPLIT_RIGHT:
++      return Split(browser, Direction::kRight);
++    case IDC_IDE_SPLIT_LEFT:
++      return Split(browser, Direction::kLeft);
++    case IDC_IDE_SPLIT_DOWN:
++      return Split(browser, Direction::kDown);
++    case IDC_IDE_SPLIT_UP:
++      return Split(browser, Direction::kUp);
++    // With no pane that way the keys keep the meaning they had before.
++    case IDC_IDE_FOCUS_PANE_LEFT:
++      if (!FocusPane(browser, Direction::kLeft)) {
++        chrome::SelectPreviousTab(browser);
++      }
++      return;
++    case IDC_IDE_FOCUS_PANE_RIGHT:
++      if (!FocusPane(browser, Direction::kRight)) {
++        chrome::SelectNextTab(browser);
++      }
++      return;
++    case IDC_IDE_FOCUS_PANE_UP:
++      if (!FocusPane(browser, Direction::kUp)) {
++        chrome::ExecuteCommand(browser, IDC_FOCUS_PREVIOUS_PANE);
++      }
++      return;
++    case IDC_IDE_FOCUS_PANE_DOWN:
++      if (!FocusPane(browser, Direction::kDown)) {
++        chrome::ExecuteCommand(browser, IDC_FOCUS_NEXT_PANE);
++      }
++      return;
++    case IDC_IDE_RESIZE_PANE_LEFT:
++      return ResizePane(model, Direction::kLeft);
++    case IDC_IDE_RESIZE_PANE_RIGHT:
++      return ResizePane(model, Direction::kRight);
++    case IDC_IDE_RESIZE_PANE_UP:
++      return ResizePane(model, Direction::kUp);
++    case IDC_IDE_RESIZE_PANE_DOWN:
++      return ResizePane(model, Direction::kDown);
++    case IDC_IDE_EQUALIZE_PANES:
++      if (split_tabs::SplitTabData* split = ActiveSplit(model)) {
++        model->UpdateSplitRatio(split->id(), 0.5);
++      }
++      return;
++  }
++}
++
++bool IsSplit(BrowserWindowInterface* browser) {
++  return ActiveSplit(browser->GetTabStripModel()) != nullptr;
++}
++
++void SwapPanes(BrowserWindowInterface* browser) {
++  TabStripModel* model = browser->GetTabStripModel();
++  if (split_tabs::SplitTabData* split = ActiveSplit(model)) {
++    model->ReverseTabsInSplit(split->id());
++  }
++}
++
++void ExitSplit(BrowserWindowInterface* browser) {
++  TabStripModel* model = browser->GetTabStripModel();
++  if (split_tabs::SplitTabData* split = ActiveSplit(model)) {
++    model->RemoveSplit(split->id());
++  }
++}
++
++bool ShowInActivePane(BrowserWindowInterface* browser,
++                      content::WebContents* contents) {
++  TabStripModel* model = browser->GetTabStripModel();
++  tabs::TabInterface* active = model->GetActiveTab();
++  const int index = model->GetIndexOfWebContents(contents);
++  if (!active || !active->IsSplit() || index == TabStripModel::kNoTab) {
++    return false;
++  }
++  // A tab in a split, including this one, or a pinned tab keeps its place.
++  tabs::TabInterface* tab = model->GetTabAtIndex(index);
++  if (tab->IsSplit() || tab->IsPinned()) {
++    return false;
++  }
++  model->UpdateTabInSplit(active, index,
++                          IsPlaceholderPage(active->GetContents())
++                              ? TabStripModel::SplitUpdateType::kReplace
++                              : TabStripModel::SplitUpdateType::kSwap);
++  return true;
++}
++
++}  // namespace ide
+diff --git a/chrome/browser/ui/views/ide/smoke.mjs b/chrome/browser/ui/views/ide/smoke.mjs
+index 03a95ce11f..d06e71ccc0 100644
+--- a/chrome/browser/ui/views/ide/smoke.mjs
++++ b/chrome/browser/ui/views/ide/smoke.mjs
+@@ -48,7 +48,7 @@ const osa = (...lines) =>
+ 
+ // Key codes, not characters: with a Zhuyin input source, `keystroke "t"` adds
+ // Option to produce "t", turning Cmd+T into Cmd+Opt+T.
+-const KC = { a: 0, t: 17, p: 35, l: 37, w: 13, v: 9, i: 34, tab: 48, ret: 36, esc: 53 };
++const KC = { a: 0, d: 2, t: 17, p: 35, l: 37, w: 13, v: 9, i: 34, equal: 24, tab: 48, ret: 36, esc: 53, left: 123, right: 124, down: 125, up: 126 };
+ 
+ const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+ 
+@@ -690,6 +690,131 @@ async function main() {
+     expect((await cdp.pages()).length === before, 'a fresh tab was closed');
+   });
+ 
++  // Split view: one fresh tab split from the keyboard; widths are read from
++  // each pane's own innerWidth.
++  const pageByUrl = async (re) => (await cdp.pages()).find((p) => re.test(p.url));
++  const size = async (re) => {
++    const p = await pageByUrl(re);
++    return p ? cdp.evaluate(p.targetId, '({ w: innerWidth, h: innerHeight, focus: document.hasFocus() })') : null;
++  };
++  const sizeWhen = (re, test) => waitFor(async () => {
++    const s = await size(re);
++    return s && test(s) ? s : null;
++  });
++  const titleIs = (prefix) => windowTitle().startsWith(prefix);
++  const ALPHA = /alpha\.html\?split/;
++  let full = null;
++
++  await check('menu: Split Right is Cmd+D, Split Down is Shift+Cmd+D', async () => {
++    const out = osa(
++      `tell application "System Events" to tell process "${PROC}"`,
++      'set m to menu "File" of menu bar item "File" of menu bar 1',
++      'set a to menu item "Split Right" of m',
++      'set b to menu item "Split Down" of m',
++      'return {enabled of a, value of attribute "AXMenuItemCmdChar" of a, value of attribute "AXMenuItemCmdChar" of b, value of attribute "AXMenuItemCmdModifiers" of b}',
++      'end tell',
++    );
++    // Modifier mask 1 is Shift; Command is implied.
++    expect(out === 'true, D, D, 1', out);
++  });
++
++  await check('Cmd+D: splits right and activates the new pane', async () => {
++    await cdp.send('Target.createTarget', { url: `${BASE}/alpha.html?split` });
++    await waitFor(async () => titleIs('Alpha page'));
++    await sleep(500);
++    full = await size(ALPHA);
++    key(KC.d, ['command']);
++    const half = await sizeWhen(ALPHA, (s) => s.w < full.w * 0.6);
++    shot('split-right');
++    expect(half, `left pane ${JSON.stringify(await size(ALPHA))}, before ${JSON.stringify(full)}`);
++    // Split panes are inset, so the height drops by a few pixels.
++    expect(half.h > full.h * 0.9, `height ${full.h} -> ${half.h}`);
++    expect(!titleIs('Alpha page'), 'the new pane is not active');
++    return `${full.w} -> ${half.w}px wide`;
++  });
++
++  await check('Shift+Cmd+D re-stacks the split, Cmd+D puts it back', async () => {
++    key(KC.d, ['command', 'shift']);
++    const stacked = await sizeWhen(ALPHA, (s) => s.w > full.w * 0.9 && s.h < full.h * 0.6);
++    shot('split-down');
++    key(KC.d, ['command']);
++    const back = await sizeWhen(ALPHA, (s) => s.w < full.w * 0.6 && s.h > full.h * 0.9);
++    expect(stacked, `not stacked: ${JSON.stringify(await size(ALPHA))}`);
++    expect(back, `not side by side again: ${JSON.stringify(await size(ALPHA))}`);
++    return `stacked ${stacked.h}px tall`;
++  });
++
++  await check('Cmd+Opt+arrows move between panes, then fall back to tabs', async () => {
++    key(KC.left, ['command', 'option']);
++    const left = await waitFor(async () => titleIs('Alpha page'));
++    const focused = await waitFor(async () => (await size(ALPHA))?.focus);
++    key(KC.left, ['command', 'option']);
++    const previous = await waitFor(async () => !titleIs('Alpha page'));
++    const previousTitle = windowTitle();
++    key(KC.right, ['command', 'option']);
++    const returned = await waitFor(async () => titleIs('Alpha page'));
++    key(KC.right, ['command', 'option']);
++    const right = await waitFor(async () => !titleIs('Alpha page'));
++    key(KC.left, ['command', 'option']);
++    await waitFor(async () => titleIs('Alpha page'));
++    expect(left, 'Cmd+Opt+Left did not select the left pane');
++    expect(focused, 'the left pane is active but has no keyboard focus');
++    expect(previous && returned, `previous tab: ${previous} (${previousTitle}), back: ${returned}`);
++    expect(right, 'Cmd+Opt+Right did not select the right pane');
++  });
++
++  await check('Cmd+Ctrl+Right moves the divider, Cmd+Ctrl+= evens it', async () => {
++    const before = (await size(ALPHA)).w;
++    key(KC.right, ['command', 'control']);
++    const wider = await sizeWhen(ALPHA, (s) => s.w > before + 20);
++    key(KC.equal, ['command', 'control']);
++    const even = await sizeWhen(ALPHA, (s) => Math.abs(s.w - before) < 4);
++    expect(wider, `divider did not move from ${before}px`);
++    expect(even, `not even again: ${JSON.stringify(await size(ALPHA))}`);
++    return `${before} -> ${wider.w} -> ${even.w}px`;
++  });
++
++  await check('Cmd+T in a split opens in the active pane and keeps the old tab', async () => {
++    await goto(`${BASE}/beta.html?pane`);
++    const beta = await sizeWhen(/beta\.html\?pane/, (s) => s.w < full.w * 0.6);
++    expect(beta, `beta: ${JSON.stringify(await size(/beta\.html\?pane/))}`);
++    expect(await pageByUrl(ALPHA), 'the tab it replaced was closed');
++    expect(await waitFor(async () => (await size(/beta\.html\?pane/))?.focus), 'the new pane has no keyboard focus');
++  });
++
++  await check('Cmd+T in a split replaces the split new-tab page', async () => {
++    key(KC.right, ['command', 'option']);
++    await waitFor(async () => !titleIs('Beta page'));
++    const placeholder = windowTitle();
++    await goto(`${BASE}/gamma.html?pane`);
++    const gamma = await sizeWhen(/gamma\.html\?pane/, (s) => s.w < full.w * 0.6);
++    shot('split-panes');
++    // The split new-tab page is no DevTools target, so look for it among the
++    // palette's open tabs; the other pane, Beta, must be listed there.
++    await openPalette({ code: KC.t, keys: ['command'] });
++    const rows = await paletteRows();
++    key(KC.esc);
++    await sleep(400);
++    expect(placeholder && !placeholder.startsWith('Beta'), `right pane was "${placeholder}"`);
++    expect(gamma, `gamma: ${JSON.stringify(await size(/gamma\.html\?pane/))}`);
++    // Seamless panes: together they fill exactly what one tab fills.
++    const beta = await size(/beta\.html\?pane/);
++    expect(beta.w + gamma.w === full.w && beta.h === full.h && gamma.h === full.h,
++      `beta ${beta.w}x${beta.h} + gamma ${gamma.w}x${gamma.h} vs one tab ${full.w}x${full.h}`);
++    expect(rows.includes('Beta page'), `palette lists no Beta: ${rows.join(' | ')}`);
++    expect(!rows.includes(placeholder), `"${placeholder}" left behind: ${rows.join(' | ')}`);
++    return `replaced "${placeholder}"; panes ${beta.w}+${gamma.w}=${full.w}px`;
++  });
++
++  await check('Cmd+W closes only the active pane', async () => {
++    key(KC.w, ['command']);
++    const solo = await sizeWhen(/beta\.html\?pane/, (s) => s.w > full.w * 0.9);
++    expect(!(await pageByUrl(/gamma\.html\?pane/)), 'gamma pane still open');
++    expect(solo, `beta: ${JSON.stringify(await size(/beta\.html\?pane/))}`);
++    expect(titleIs('Beta page'), `active: ${windowTitle()}`);
++    expect(await waitFor(async () => (await size(/beta\.html\?pane/))?.focus), 'the remaining pane has no keyboard focus');
++  });
++
+   await check('no new crash dumps', async () => {
+     const after = fs.existsSync(CRASH_DIR) ? fs.readdirSync(CRASH_DIR).length : 0;
+     expect(after === crashesBefore, `${after - crashesBefore} new dump(s) in ${CRASH_DIR}`);

@@ -55,11 +55,30 @@ is in [lottie-preview/](lottie-preview), built on
 - Background tabs left idle for 12 hours close themselves; pinned tabs stay.
 - H.264 and AAC playback.
 
+## Build
+
+Shiny is Chromium stable at the version in [CHROMIUM_VERSION](CHROMIUM_VERSION) plus the commits
+in [patches/](patches), one per feature, compiled with [args.gn](args.gn). On a Mac with Xcode
+and 45 GB free:
+
+    git clone https://github.com/ShinyChang/shiny-browser
+    shiny-browser/scripts/build.sh ~/shiny-chromium
+
+The script fetches Chromium without its history, applies the patches and builds
+`~/shiny-chromium/src/out/Release/Shiny.app`. On an M1 Max with `JOBS=8` the fetch took 12
+minutes and the compile 2 hours 40 minutes. Running it again resumes an interrupted fetch or
+build.
+
+The build is ad-hoc signed, so macOS may ask again for keychain access or camera and microphone
+permission after an update. `scripts/sign.sh Shiny.app IDENTITY` signs it with your own
+code-signing identity instead.
+
 ## Updates
 
 A daily GitHub Actions job compares Chrome stable for Mac with `CHROMIUM_VERSION` and opens a
-`chrome-update` issue when a newer version ships. The issue is closed once Shiny has been rebuilt
-on that version. The Chromium patches themselves are not published here.
+`chrome-update` issue when a newer version ships. Shiny is then rebuilt on that version in a new
+work directory, and `scripts/export-patches.sh` writes the rebased commits back to `patches/`,
+`lottie-preview/` and `CHROMIUM_VERSION`. The issue is closed with that commit.
 
 Pages in the screenshots: [Wikipedia](https://en.wikipedia.org/wiki/Chromium_(web_browser))
 (CC BY-SA 4.0) and [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript)

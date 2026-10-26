@@ -1,0 +1,7 @@
+is_debug = false
+symbol_level = 0
+blink_symbol_level = 0
+v8_symbol_level = 0
+is_component_build = false
+proprietary_codecs = true
+ffmpeg_branding = "Chrome"
