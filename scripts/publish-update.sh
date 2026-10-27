@@ -52,6 +52,17 @@ plutil -replace SUEnableAutomaticChecks -bool YES "$PLIST"
 plutil -replace SUScheduledCheckInterval -integer 14400 "$PLIST"
 
 "$REPO/scripts/sign.sh" "$NEW" "$SIGN_IDENTITY"
+# macOS treats an app signed with a revoked certificate as malware and moves it to the trash,
+# and `security find-identity -v` still lists such an identity as valid.
+if [ "$SIGN_IDENTITY" != "-" ]; then
+  codesign -d --extract-certificates="$STAGE/cert" "$NEW" 2> /dev/null
+  chain=()
+  for c in "$STAGE"/cert*; do chain+=(-c "$c"); done
+  if ! security verify-cert "${chain[@]}" -p codeSign -R ocsp -R require > "$STAGE/verify.log" 2>&1; then
+    echo "$SIGN_IDENTITY failed the revocation check: $(tail -1 "$STAGE/verify.log")" >&2
+    exit 1
+  fi
+fi
 ditto -c -k --sequesterRsrc --keepParent "$NEW" "$UPDATES/Shiny-$short-$n.zip"
 echo "$n" > "$UPDATES/build-number"
 
