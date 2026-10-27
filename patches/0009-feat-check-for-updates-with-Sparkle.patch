@@ -1,0 +1,181 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shiny <owner@shinychang.net>
+Date: Tue, 27 Oct 2026 11:26:55 +0800
+Subject: [PATCH] feat: check for updates with Sparkle
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A Shiny.app published as a Sparkle update carries Sparkle.framework and an
+SUFeedURL in its Info.plist. Shiny then loads Sparkle at startup, checks
+the feed on its schedule and adds Check for Updates… to the app menu and
+the command palette. A build without a feed never loads Sparkle.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
+---
+ .../chrome_browser_main_extra_parts_views.cc  |  1 +
+ chrome/browser/ui/views/ide/ide_internal.h    |  4 ++
+ chrome/browser/ui/views/ide/ide_mac.mm        | 55 +++++++++++++++++++
+ chrome/browser/ui/views/ide/ide_palette.cc    |  8 +++
+ chrome/browser/ui/views/ide/ide_palette.h     |  3 +
+ 5 files changed, 71 insertions(+)
+
+diff --git a/chrome/browser/ui/views/chrome_browser_main_extra_parts_views.cc b/chrome/browser/ui/views/chrome_browser_main_extra_parts_views.cc
+index d02997b11f..94f2f43978 100644
+--- a/chrome/browser/ui/views/chrome_browser_main_extra_parts_views.cc
++++ b/chrome/browser/ui/views/chrome_browser_main_extra_parts_views.cc
+@@ -198,6 +198,7 @@ void ChromeBrowserMainExtraPartsViews::PostBrowserStart() {
+ 
+   infobars::RegisterInfoBars();
+   ide::StartIdleTabCloser();
++  ide::StartUpdater();
+ }
+ 
+ void ChromeBrowserMainExtraPartsViews::PostMainMessageLoopRun() {
+diff --git a/chrome/browser/ui/views/ide/ide_internal.h b/chrome/browser/ui/views/ide/ide_internal.h
+index 4152c4dff8..d799cf407d 100644
+--- a/chrome/browser/ui/views/ide/ide_internal.h
++++ b/chrome/browser/ui/views/ide/ide_internal.h
+@@ -108,6 +108,10 @@ bool ShowInActivePane(BrowserWindowInterface* browser,
+ // Empty when the command has no keyboard shortcut.
+ std::u16string ShortcutForCommand(int command);
+ 
++// False unless StartUpdater found Sparkle in the app bundle.
++bool CanCheckForUpdates();
++void CheckForUpdates();
++
+ }  // namespace ide
+ 
+ #endif  // CHROME_BROWSER_UI_VIEWS_IDE_IDE_INTERNAL_H_
+diff --git a/chrome/browser/ui/views/ide/ide_mac.mm b/chrome/browser/ui/views/ide/ide_mac.mm
+index 4e08c28ed9..372d819a6a 100644
+--- a/chrome/browser/ui/views/ide/ide_mac.mm
++++ b/chrome/browser/ui/views/ide/ide_mac.mm
+@@ -4,12 +4,29 @@
+ 
+ #import <AppKit/AppKit.h>
+ 
++#include "base/apple/bundle_locations.h"
+ #include "chrome/browser/ui/cocoa/accelerators_cocoa.h"
+ #include "chrome/browser/ui/views/ide/ide_internal.h"
++#include "chrome/browser/ui/views/ide/ide_palette.h"
+ #include "ui/base/accelerators/accelerator.h"
+ 
++// Sparkle is loaded at runtime, so its headers are not available; these are
++// the SPUStandardUpdaterController methods used here.
++@protocol IdeSparkleUpdater
++- (instancetype)initWithStartingUpdater:(BOOL)startUpdater
++                        updaterDelegate:(id)updaterDelegate
++                     userDriverDelegate:(id)userDriverDelegate;
++- (void)checkForUpdates:(id)sender;
++@end
++
+ namespace ide {
+ 
++namespace {
++
++id<IdeSparkleUpdater> g_updater = nil;
++
++}  // namespace
++
+ bool IsControlKeyDown() {
+   return (NSEvent.modifierFlags & NSEventModifierFlagControl) != 0;
+ }
+@@ -20,4 +37,42 @@ bool IsControlKeyDown() {
+   return accelerator ? accelerator->GetShortcutText() : std::u16string();
+ }
+ 
++void StartUpdater() {
++  if (g_updater) {
++    return;
++  }
++  // Only builds published as updates carry Sparkle and a feed, so a build
++  // made from the patches alone never checks anywhere.
++  NSBundle* app = base::apple::OuterBundle();
++  if (![app objectForInfoDictionaryKey:@"SUFeedURL"]) {
++    return;
++  }
++  NSBundle* sparkle = [NSBundle
++      bundleWithPath:[app.privateFrameworksPath
++                         stringByAppendingPathComponent:@"Sparkle.framework"]];
++  Class controller =
++      [sparkle load] ? NSClassFromString(@"SPUStandardUpdaterController") : nil;
++  if (!controller) {
++    return;
++  }
++  g_updater = [[controller alloc] initWithStartingUpdater:YES
++                                          updaterDelegate:nil
++                                       userDriverDelegate:nil];
++  NSMenuItem* item =
++      [[NSMenuItem alloc] initWithTitle:@"Check for Updates…"
++                                 action:@selector(checkForUpdates:)
++                          keyEquivalent:@""];
++  item.target = g_updater;
++  // Below "About Shiny", where Mac apps keep it.
++  [NSApp.mainMenu.itemArray.firstObject.submenu insertItem:item atIndex:1];
++}
++
++bool CanCheckForUpdates() {
++  return g_updater != nil;
++}
++
++void CheckForUpdates() {
++  [g_updater checkForUpdates:nil];
++}
++
+ }  // namespace ide
+diff --git a/chrome/browser/ui/views/ide/ide_palette.cc b/chrome/browser/ui/views/ide/ide_palette.cc
+index 0090110543..bf4857ecb8 100644
+--- a/chrome/browser/ui/views/ide/ide_palette.cc
++++ b/chrome/browser/ui/views/ide/ide_palette.cc
+@@ -101,6 +101,7 @@ enum SpecialCommand {
+   kCloseIdleTabsNow = -3,
+   kSwapPanes = -4,
+   kExitSplit = -5,
++  kCheckForUpdates = -6,
+ };
+ 
+ struct Command {
+@@ -152,6 +153,7 @@ constexpr Command kCommands[] = {
+     {u"Browser: Extensions", IDC_MANAGE_EXTENSIONS},
+     {u"Browser: History", IDC_SHOW_HISTORY},
+     {u"Browser: Clear Browsing Data…", IDC_CLEAR_BROWSING_DATA},
++    {u"Browser: Check for Updates…", kCheckForUpdates},
+ };
+ 
+ struct Item {
+@@ -303,6 +305,9 @@ void RunCommand(BrowserWindowInterface* browser, int command) {
+     case kExitSplit:
+       ExitSplit(browser);
+       return;
++    case kCheckForUpdates:
++      CheckForUpdates();
++      return;
+     default:
+       chrome::ExecuteCommand(browser, command);
+   }
+@@ -608,6 +613,9 @@ class PaletteContents : public views::View, public views::TextfieldController {
+       if (NeedsSplit(command.id) && !IsSplit(browser_)) {
+         continue;
+       }
++      if (command.id == kCheckForUpdates && !CanCheckForUpdates()) {
++        continue;
++      }
+       Item item;
+       item.kind = Item::Kind::kCommand;
+       item.command = command.id;
+diff --git a/chrome/browser/ui/views/ide/ide_palette.h b/chrome/browser/ui/views/ide/ide_palette.h
+index dcee59aa45..c7b0acf294 100644
+--- a/chrome/browser/ui/views/ide/ide_palette.h
++++ b/chrome/browser/ui/views/ide/ide_palette.h
+@@ -26,6 +26,9 @@ void RunSplitCommand(BrowserWindowInterface* browser, int command_id);
+ // Idempotent; called once the browser process has started.
+ void StartIdleTabCloser();
+ 
++// Loads Sparkle when the app bundle ships it; idempotent.
++void StartUpdater();
++
+ }  // namespace ide
+ 
+ #endif  // CHROME_BROWSER_UI_VIEWS_IDE_IDE_PALETTE_H_
