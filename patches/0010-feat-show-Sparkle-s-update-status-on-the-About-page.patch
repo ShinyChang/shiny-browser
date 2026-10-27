@@ -1,0 +1,510 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shiny <owner@shinychang.net>
+Date: Tue, 27 Oct 2026 12:47:33 +0800
+Subject: [PATCH] feat: show Sparkle's update status on the About page
+
+The About page reported "error code 0" from Chromium's updater stub. It now
+asks Sparkle quietly whether a newer build is published and says "Shiny is
+up to date", or "Shiny X is available." and opens Sparkle's install window.
+Builds without Sparkle hide the status line.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
+---
+ chrome/browser/ui/BUILD.gn                    |   1 +
+ chrome/browser/ui/views/ide/ide_mac.mm        |  42 +----
+ chrome/browser/ui/webui/help/BUILD.gn         |   7 +-
+ .../ui/webui/help/sparkle_updater_mac.h       |  42 +++++
+ .../ui/webui/help/sparkle_updater_mac.mm      | 150 ++++++++++++++++++
+ .../ui/webui/help/version_updater_mac.mm      | 134 +++++-----------
+ 6 files changed, 245 insertions(+), 131 deletions(-)
+ create mode 100644 chrome/browser/ui/webui/help/sparkle_updater_mac.h
+ create mode 100644 chrome/browser/ui/webui/help/sparkle_updater_mac.mm
+
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index 0a3f05b705..91ed593130 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -3545,6 +3545,7 @@ static_library("ui") {
+     ]
+     if (is_mac) {
+       sources += [ "views/ide/ide_mac.mm" ]
++      deps += [ "//chrome/browser/ui/webui/help" ]
+     }
+ 
+     sources += get_target_outputs(":webui_name_variants")
+diff --git a/chrome/browser/ui/views/ide/ide_mac.mm b/chrome/browser/ui/views/ide/ide_mac.mm
+index 372d819a6a..16e6addd4b 100644
+--- a/chrome/browser/ui/views/ide/ide_mac.mm
++++ b/chrome/browser/ui/views/ide/ide_mac.mm
+@@ -4,29 +4,14 @@
+ 
+ #import <AppKit/AppKit.h>
+ 
+-#include "base/apple/bundle_locations.h"
+ #include "chrome/browser/ui/cocoa/accelerators_cocoa.h"
+ #include "chrome/browser/ui/views/ide/ide_internal.h"
+ #include "chrome/browser/ui/views/ide/ide_palette.h"
++#include "chrome/browser/ui/webui/help/sparkle_updater_mac.h"
+ #include "ui/base/accelerators/accelerator.h"
+ 
+-// Sparkle is loaded at runtime, so its headers are not available; these are
+-// the SPUStandardUpdaterController methods used here.
+-@protocol IdeSparkleUpdater
+-- (instancetype)initWithStartingUpdater:(BOOL)startUpdater
+-                        updaterDelegate:(id)updaterDelegate
+-                     userDriverDelegate:(id)userDriverDelegate;
+-- (void)checkForUpdates:(id)sender;
+-@end
+-
+ namespace ide {
+ 
+-namespace {
+-
+-id<IdeSparkleUpdater> g_updater = nil;
+-
+-}  // namespace
+-
+ bool IsControlKeyDown() {
+   return (NSEvent.modifierFlags & NSEventModifierFlagControl) != 0;
+ }
+@@ -38,41 +23,28 @@ bool IsControlKeyDown() {
+ }
+ 
+ void StartUpdater() {
+-  if (g_updater) {
+-    return;
+-  }
+-  // Only builds published as updates carry Sparkle and a feed, so a build
+-  // made from the patches alone never checks anywhere.
+-  NSBundle* app = base::apple::OuterBundle();
+-  if (![app objectForInfoDictionaryKey:@"SUFeedURL"]) {
++  if (sparkle_updater::IsAvailable()) {
+     return;
+   }
+-  NSBundle* sparkle = [NSBundle
+-      bundleWithPath:[app.privateFrameworksPath
+-                         stringByAppendingPathComponent:@"Sparkle.framework"]];
+-  Class controller =
+-      [sparkle load] ? NSClassFromString(@"SPUStandardUpdaterController") : nil;
+-  if (!controller) {
++  sparkle_updater::Start();
++  if (!sparkle_updater::IsAvailable()) {
+     return;
+   }
+-  g_updater = [[controller alloc] initWithStartingUpdater:YES
+-                                          updaterDelegate:nil
+-                                       userDriverDelegate:nil];
+   NSMenuItem* item =
+       [[NSMenuItem alloc] initWithTitle:@"Check for Updates…"
+                                  action:@selector(checkForUpdates:)
+                           keyEquivalent:@""];
+-  item.target = g_updater;
++  item.target = sparkle_updater::Controller();
+   // Below "About Shiny", where Mac apps keep it.
+   [NSApp.mainMenu.itemArray.firstObject.submenu insertItem:item atIndex:1];
+ }
+ 
+ bool CanCheckForUpdates() {
+-  return g_updater != nil;
++  return sparkle_updater::IsAvailable();
+ }
+ 
+ void CheckForUpdates() {
+-  [g_updater checkForUpdates:nil];
++  sparkle_updater::CheckWithUI();
+ }
+ 
+ }  // namespace ide
+diff --git a/chrome/browser/ui/webui/help/BUILD.gn b/chrome/browser/ui/webui/help/BUILD.gn
+index 17d8d3e283..2547b9785f 100644
+--- a/chrome/browser/ui/webui/help/BUILD.gn
++++ b/chrome/browser/ui/webui/help/BUILD.gn
+@@ -36,7 +36,12 @@ source_set("help") {
+   }
+ 
+   if (is_mac) {
+-    sources = [ "version_updater_mac.mm" ]
++    sources = [
++      "sparkle_updater_mac.h",
++      "sparkle_updater_mac.mm",
++      "version_updater_mac.mm",
++    ]
++    public += [ "sparkle_updater_mac.h" ]
+     deps += [
+       "//base:i18n",
+       "//chrome/app:branded_strings",
+diff --git a/chrome/browser/ui/webui/help/sparkle_updater_mac.h b/chrome/browser/ui/webui/help/sparkle_updater_mac.h
+new file mode 100644
+index 0000000000..064e4503de
+--- /dev/null
++++ b/chrome/browser/ui/webui/help/sparkle_updater_mac.h
+@@ -0,0 +1,42 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_WEBUI_HELP_SPARKLE_UPDATER_MAC_H_
++#define CHROME_BROWSER_UI_WEBUI_HELP_SPARKLE_UPDATER_MAC_H_
++
++#include <string>
++
++#include "base/functional/callback_forward.h"
++
++// Shiny updates itself with Sparkle, which only a build published as an update
++// carries, together with the feed in its Info.plist.
++namespace sparkle_updater {
++
++enum class Result { kUpToDate, kUpdateAvailable, kBusy, kFailed };
++
++// `detail` is the new version for kUpdateAvailable and the reason for kFailed.
++using QuietCheckCallback =
++    base::OnceCallback<void(Result result, const std::u16string& detail)>;
++
++// Loads Sparkle when the app bundle ships it; idempotent.
++void Start();
++
++// False unless Start found Sparkle in the app bundle.
++bool IsAvailable();
++
++// Sparkle's own check, which shows its up-to-date or new-version window.
++void CheckWithUI();
++
++// Reads the feed without a window. kBusy means another check or an update
++// already holds Sparkle's session.
++void CheckQuietly(QuietCheckCallback callback);
++
++#if defined(__OBJC__)
++// The SPUStandardUpdaterController, a target for checkForUpdates: menu items.
++id Controller();
++#endif
++
++}  // namespace sparkle_updater
++
++#endif  // CHROME_BROWSER_UI_WEBUI_HELP_SPARKLE_UPDATER_MAC_H_
+diff --git a/chrome/browser/ui/webui/help/sparkle_updater_mac.mm b/chrome/browser/ui/webui/help/sparkle_updater_mac.mm
+new file mode 100644
+index 0000000000..5f8a15af49
+--- /dev/null
++++ b/chrome/browser/ui/webui/help/sparkle_updater_mac.mm
+@@ -0,0 +1,150 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/webui/help/sparkle_updater_mac.h"
++
++#import <Foundation/Foundation.h>
++
++#include <utility>
++#include <vector>
++
++#include "base/apple/bundle_locations.h"
++#include "base/functional/callback.h"
++#include "base/no_destructor.h"
++#include "base/strings/sys_string_conversions.h"
++
++// Sparkle is loaded at runtime, so its headers are not available; these are
++// the methods of SPUStandardUpdaterController, SPUUpdater and SUAppcastItem
++// used here.
++@protocol ShinySparkleController
++- (instancetype)initWithStartingUpdater:(BOOL)startUpdater
++                        updaterDelegate:(id)updaterDelegate
++                     userDriverDelegate:(id)userDriverDelegate;
++- (void)checkForUpdates:(id)sender;
++- (id)updater;
++@end
++
++@protocol ShinySparkleUpdater
++- (void)checkForUpdateInformation;
++- (BOOL)sessionInProgress;
++@end
++
++@protocol ShinySparkleAppcastItem
++- (NSString*)displayVersionString;
++@end
++
++@interface ShinySparkleDelegate : NSObject
++@end
++
++namespace sparkle_updater {
++namespace {
++
++// SPUUpdateCheckUpdateInformation and SUNoUpdateError in Sparkle's headers.
++constexpr NSInteger kQuietCheck = 2;
++constexpr NSInteger kNoUpdateError = 1001;
++
++id<ShinySparkleController> g_controller = nil;
++// Sparkle holds its delegate weakly.
++ShinySparkleDelegate* g_delegate = nil;
++NSString* g_found_version = nil;
++
++std::vector<QuietCheckCallback>& PendingChecks() {
++  static base::NoDestructor<std::vector<QuietCheckCallback>> checks;
++  return *checks;
++}
++
++void FinishQuietChecks(Result result, const std::u16string& detail) {
++  std::vector<QuietCheckCallback> checks = std::move(PendingChecks());
++  PendingChecks().clear();
++  for (QuietCheckCallback& check : checks) {
++    std::move(check).Run(result, detail);
++  }
++}
++
++}  // namespace
++}  // namespace sparkle_updater
++
++@implementation ShinySparkleDelegate
++
++- (void)updater:(id)updater didFindValidUpdate:(id<ShinySparkleAppcastItem>)item {
++  sparkle_updater::g_found_version = [item displayVersionString];
++}
++
++- (void)updater:(id)updater
++    didFinishUpdateCycleForUpdateCheck:(NSInteger)updateCheck
++                                 error:(NSError*)error {
++  using sparkle_updater::Result;
++  NSString* version = sparkle_updater::g_found_version;
++  sparkle_updater::g_found_version = nil;
++  if (updateCheck != sparkle_updater::kQuietCheck) {
++    return;
++  }
++  if (version) {
++    sparkle_updater::FinishQuietChecks(Result::kUpdateAvailable,
++                                       base::SysNSStringToUTF16(version));
++  } else if (!error || ([error.domain isEqualToString:@"SUSparkleErrorDomain"] &&
++                        error.code == sparkle_updater::kNoUpdateError)) {
++    sparkle_updater::FinishQuietChecks(Result::kUpToDate, std::u16string());
++  } else {
++    sparkle_updater::FinishQuietChecks(
++        Result::kFailed, base::SysNSStringToUTF16(error.localizedDescription));
++  }
++}
++
++@end
++
++namespace sparkle_updater {
++
++void Start() {
++  if (g_controller) {
++    return;
++  }
++  // Only builds published as updates carry Sparkle and a feed, so a build
++  // made from the patches alone never checks anywhere.
++  NSBundle* app = base::apple::OuterBundle();
++  if (![app objectForInfoDictionaryKey:@"SUFeedURL"]) {
++    return;
++  }
++  NSBundle* sparkle = [NSBundle
++      bundleWithPath:[app.privateFrameworksPath
++                         stringByAppendingPathComponent:@"Sparkle.framework"]];
++  Class controller =
++      [sparkle load] ? NSClassFromString(@"SPUStandardUpdaterController") : nil;
++  if (!controller) {
++    return;
++  }
++  g_delegate = [[ShinySparkleDelegate alloc] init];
++  g_controller = [[controller alloc] initWithStartingUpdater:YES
++                                             updaterDelegate:g_delegate
++                                          userDriverDelegate:nil];
++}
++
++bool IsAvailable() {
++  return g_controller != nil;
++}
++
++void CheckWithUI() {
++  [g_controller checkForUpdates:nil];
++}
++
++void CheckQuietly(QuietCheckCallback callback) {
++  if (!PendingChecks().empty()) {
++    PendingChecks().push_back(std::move(callback));
++    return;
++  }
++  id<ShinySparkleUpdater> updater = [g_controller updater];
++  // Sparkle ignores a quiet check while a session runs, so it would never end.
++  if (!updater || [updater sessionInProgress]) {
++    std::move(callback).Run(Result::kBusy, std::u16string());
++    return;
++  }
++  PendingChecks().push_back(std::move(callback));
++  [updater checkForUpdateInformation];
++}
++
++id Controller() {
++  return g_controller;
++}
++
++}  // namespace sparkle_updater
+diff --git a/chrome/browser/ui/webui/help/version_updater_mac.mm b/chrome/browser/ui/webui/help/version_updater_mac.mm
+index 57648956fa..bce6dbaf73 100644
+--- a/chrome/browser/ui/webui/help/version_updater_mac.mm
++++ b/chrome/browser/ui/webui/help/version_updater_mac.mm
+@@ -4,112 +4,53 @@
+ 
+ #include "chrome/browser/ui/webui/help/version_updater.h"
+ 
+-#import <Foundation/Foundation.h>
+-
+-#include <algorithm>
+ #include <memory>
+ #include <string>
+-#include <utility>
+ 
+-#include "base/apple/foundation_util.h"
+ #include "base/functional/bind.h"
+-#include "base/functional/callback.h"
+-#include "base/functional/callback_helpers.h"
+-#include "base/logging.h"
+-#include "base/mac/authorization_util.h"
+ #include "base/memory/ptr_util.h"
+-#include "base/memory/scoped_refptr.h"
+-#include "base/strings/stringprintf.h"
+-#include "base/strings/utf_string_conversions.h"
+-#include "base/task/task_traits.h"
+-#include "base/task/thread_pool.h"
+-#include "base/version.h"
+-#include "chrome/browser/updater/updater.h"
+-#include "chrome/browser/upgrade_detector/upgrade_detector.h"
++#include "chrome/browser/ui/webui/help/sparkle_updater_mac.h"
++#include "chrome/grit/branded_strings.h"
+ #include "chrome/grit/generated_resources.h"
+-#include "chrome/updater/constants.h"
+-#include "chrome/updater/update_service.h"
+-#include "chrome/updater/updater_scope.h"
+ #include "ui/base/l10n/l10n_util.h"
+-#include "ui/base/l10n/l10n_util_mac.h"
+ 
+ namespace {
+ 
+-int GetDownloadProgress(int64_t downloaded_bytes, int64_t total_bytes) {
+-  if (downloaded_bytes < 0 || total_bytes <= 0) {
+-    return -1;
+-  }
+-  return 100 * std::clamp(static_cast<double>(downloaded_bytes) / total_bytes,
+-                          0.0, 1.0);
++void ReportStatus(const VersionUpdater::StatusCallback& status_callback,
++                  VersionUpdater::Status status,
++                  const std::u16string& message) {
++  status_callback.Run(status, 0, false, false, std::string(), 0, message);
+ }
+ 
+-void UpdateStatus(VersionUpdater::StatusCallback status_callback,
+-                  const updater::UpdateService::UpdateState& update_state) {
+-  VersionUpdater::Status status = VersionUpdater::Status::CHECKING;
+-  int progress = 0;
+-  std::string version;
+-  std::u16string err_message;
+-
+-  switch (update_state.state) {
+-    case updater::UpdateService::UpdateState::State::kCheckingForUpdates:
+-      [[fallthrough]];
+-    case updater::UpdateService::UpdateState::State::kUpdateAvailable:
+-      status = VersionUpdater::Status::CHECKING;
+-      break;
+-    case updater::UpdateService::UpdateState::State::kDownloading:
+-      progress = GetDownloadProgress(update_state.downloaded_bytes,
+-                                     update_state.total_bytes);
+-      [[fallthrough]];
+-    case updater::UpdateService::UpdateState::State::kDecompressing:
+-      [[fallthrough]];
+-    case updater::UpdateService::UpdateState::State::kPatching:
+-      [[fallthrough]];
+-    case updater::UpdateService::UpdateState::State::kInstalling:
+-      status = VersionUpdater::Status::UPDATING;
+-      break;
+-    case updater::UpdateService::UpdateState::State::kUpdated:
+-      status = VersionUpdater::Status::NEARLY_UPDATED;
+-      break;
+-    case updater::UpdateService::UpdateState::State::kNoUpdate:
+-      status = UpgradeDetector::GetInstance()->is_upgrade_available()
+-                   ? VersionUpdater::Status::NEARLY_UPDATED
+-                   : VersionUpdater::Status::UPDATED;
+-      break;
+-    case updater::UpdateService::UpdateState::State::kUpdateError:
+-      switch (update_state.error_code) {
+-        case updater::GOOPDATE_E_APP_UPDATE_DISABLED_BY_POLICY:
+-          status = VersionUpdater::Status::DISABLED_BY_ADMIN;
+-          err_message =
+-              l10n_util::GetStringUTF16(IDS_UPGRADE_DISABLED_BY_POLICY);
+-          break;
+-        case updater::GOOPDATE_E_APP_UPDATE_DISABLED_BY_POLICY_MANUAL:
+-          status = VersionUpdater::Status::DISABLED_BY_ADMIN;
+-          err_message =
+-              l10n_util::GetStringUTF16(IDS_UPGRADE_DISABLED_BY_POLICY_MANUAL);
+-          break;
+-        default:
+-          status = VersionUpdater::Status::FAILED;
+-          err_message = l10n_util::GetStringFUTF16(
+-              IDS_ABOUT_BOX_ERROR_DURING_UPDATE_CHECK,
+-              l10n_util::GetStringFUTF16(IDS_ABOUT_BOX_GOOGLE_UPDATE_ERROR,
+-                                         base::UTF8ToUTF16(base::StringPrintf(
+-                                             "%d", update_state.error_code)),
+-                                         base::UTF8ToUTF16(base::StringPrintf(
+-                                             "%d", update_state.extra_code1))));
+-          break;
+-      }
+-      break;
+-    case updater::UpdateService::UpdateState::State::kNotStarted:
+-      [[fallthrough]];
+-    case updater::UpdateService::UpdateState::State::kUnknown:
++void ReportQuietCheck(VersionUpdater::StatusCallback status_callback,
++                      sparkle_updater::Result result,
++                      const std::u16string& detail) {
++  switch (result) {
++    case sparkle_updater::Result::kUpToDate:
++      ReportStatus(status_callback, VersionUpdater::UPDATED, std::u16string());
++      return;
++    case sparkle_updater::Result::kUpdateAvailable:
++      // Sparkle's window offers the update, so the page only names it.
++      sparkle_updater::CheckWithUI();
++      ReportStatus(status_callback, VersionUpdater::DEFERRED,
++                   l10n_util::GetStringUTF16(IDS_PRODUCT_NAME) + u" " + detail +
++                       u" is available.");
++      return;
++    case sparkle_updater::Result::kBusy:
++      // A check or an update already has Sparkle's window open.
++      sparkle_updater::CheckWithUI();
++      ReportStatus(status_callback, VersionUpdater::DISABLED, std::u16string());
++      return;
++    case sparkle_updater::Result::kFailed:
++      ReportStatus(status_callback, VersionUpdater::FAILED,
++                   l10n_util::GetStringFUTF16(
++                       IDS_ABOUT_BOX_ERROR_DURING_UPDATE_CHECK, detail));
+       return;
+   }
+-
+-  status_callback.Run(status, progress, false, false, version, 0, err_message);
+ }
+ 
+ // macOS implementation of version update functionality, used by the WebUI
+-// About/Help page.
++// About/Help page. Shiny updates with Sparkle instead of Google's updater.
+ class VersionUpdaterMac : public VersionUpdater {
+  public:
+   VersionUpdaterMac() = default;
+@@ -120,13 +61,16 @@ void UpdateStatus(VersionUpdater::StatusCallback status_callback,
+   // VersionUpdater implementation.
+   void CheckForUpdate(StatusCallback status_callback,
+                       PromoteCallback promote_callback) override {
+-    updater::EnsureUpdater(
+-        base::TaskPriority::USER_VISIBLE,
+-        base::BindOnce(promote_callback, PromotionState::PROMOTE_ENABLED),
+-        base::BindOnce(&updater::CheckForUpdate,
+-                       base::BindRepeating(&UpdateStatus, status_callback)));
++    // A build that was not published as an update cannot update itself.
++    if (!sparkle_updater::IsAvailable()) {
++      ReportStatus(status_callback, DISABLED, std::u16string());
++      return;
++    }
++    ReportStatus(status_callback, CHECKING, std::u16string());
++    sparkle_updater::CheckQuietly(
++        base::BindOnce(&ReportQuietCheck, status_callback));
+   }
+-  void PromoteUpdater() override { updater::SetUpSystemUpdater(); }
++  void PromoteUpdater() override {}
+ };
+ 
+ }  // namespace

@@ -83,8 +83,8 @@ work directory, and `scripts/export-patches.sh` writes the rebased commits back 
 `scripts/publish-update.sh Shiny.app UPDATES_DIR` turns a build into a
 [Sparkle](https://sparkle-project.org) update: it adds Sparkle, signs the app and writes the
 archive and `appcast.xml` for any web server to serve. A copy installed from such an archive
-checks the feed every four hours and offers to install newer builds. A build that was not
-published this way never checks for updates.
+checks the feed every four hours and offers to install newer builds; its About page says whether
+one is available. A build that was not published this way never checks for updates.
 
 Pages in the screenshots: [Wikipedia](https://en.wikipedia.org/wiki/Chromium_(web_browser))
 (CC BY-SA 4.0) and [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript)
