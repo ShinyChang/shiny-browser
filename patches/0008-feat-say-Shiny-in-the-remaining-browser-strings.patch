@@ -1,0 +1,451 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shiny <owner@shinychang.net>
+Date: Tue, 27 Oct 2026 09:56:54 +0800
+Subject: [PATCH] feat: say Shiny in the remaining browser strings
+
+Password manager, autofill, certificate error, search engine choice,
+page info, crash and management strings named Chromium as the browser.
+Mentions of the Chromium project, its authors and its developers stay.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
+---
+ chrome/app/password_manager_ui_strings.grdp    | 18 +++++++++---------
+ components/autofill_payments_strings.grdp      | 12 ++++++------
+ components/autofill_strings.grdp               | 12 ++++++------
+ components/management_strings.grdp             |  4 ++--
+ components/new_or_sad_tab_strings.grdp         |  4 ++--
+ components/page_info_strings.grdp              | 12 ++++++------
+ components/password_manager_strings.grdp       |  8 ++++----
+ components/privacy_sandbox_strings.grd         |  4 ++--
+ components/reset_password_strings.grdp         |  4 ++--
+ components/search_engine_choice_strings.grdp   | 14 +++++++-------
+ components/security_interstitials_strings.grdp |  8 ++++----
+ components/ssl_errors_strings.grdp             |  6 +++---
+ 12 files changed, 53 insertions(+), 53 deletions(-)
+
+diff --git a/chrome/app/password_manager_ui_strings.grdp b/chrome/app/password_manager_ui_strings.grdp
+index e49648c05c..bdff492530 100644
+--- a/chrome/app/password_manager_ui_strings.grdp
++++ b/chrome/app/password_manager_ui_strings.grdp
+@@ -896,7 +896,7 @@
+         Password Manager needs access to MacOS Keychain
+       </message>
+       <message name="IDS_PASSWORD_MANAGER_UI_RELAUNCH_CHROME_PROMO_CARD_DESCRIPTION" desc="Description for not branded Relaunch ChrChromiumome promo card.">
+-        To use Password Manager with macOS Keychain, relaunch Chromium and allow Keychain access. Your tabs will reopen after relaunching.
++        To use Password Manager with macOS Keychain, relaunch Shiny and allow Keychain access. Your tabs will reopen after relaunching.
+       </message>
+     </else>
+     </if>
+@@ -916,7 +916,7 @@
+         Password Manager needs more access
+       </message>
+       <message name="IDS_PASSWORD_MANAGER_UI_RELAUNCH_CHROME_PROMO_CARD_DESCRIPTION_LINUX" desc="Description for the Relaunch Chromium promo card.">
+-        To use Password Manager with your operating system, relaunch Chromium and allow access to your computer's password manager. Your tabs will reopen after relaunching.
++        To use Password Manager with your operating system, relaunch Shiny and allow access to your computer's password manager. Your tabs will reopen after relaunching.
+       </message>
+     </else>
+     </if>
+@@ -930,7 +930,7 @@
+     </then>
+     <else>
+       <message name="IDS_PASSWORD_MANAGER_UI_RELAUNCH_CHROME_PROMO_CARD_ACTION" desc="Action button for not branded Relaunch Chrome promo card.">
+-        Relaunch Chromium
++        Relaunch Shiny
+       </message>
+     </else>
+     </if>
+@@ -1037,7 +1037,7 @@
+   </then>
+   <else>
+     <message name="IDS_PASSWORD_MANAGER_UI_PASSWORD_CHANGE_TOAST_SIGN_IN_TO_CONTINUE" desc="The description for the automated password change entry in Password Manager settings.">
+-      You need to sign in before Chromium can finish this task
++      You need to sign in before Shiny can finish this task
+     </message>
+   </else>
+   </if>
+@@ -1108,7 +1108,7 @@
+   </then>
+   <else>
+     <message name="IDS_PASSWORD_MANAGER_UI_PASSWORD_CHANGE_SETTINGS_DESCRIPTION" desc="The description for the automated password change entry in Password Manager settings.">
+-      If Chromium finds one of your passwords in a public data breach, it can offer to change your password for you if you're signed in
++      If Shiny finds one of your passwords in a public data breach, it can offer to change your password for you if you're signed in
+     </message>
+   </else>
+   </if>
+@@ -1123,7 +1123,7 @@
+   </then>
+   <else>
+     <message name="IDS_PASSWORD_MANAGER_UI_PASSWORD_CHANGE_SETTINGS_WITH_PRIVATE_INFERENCE_DESCRIPTION" desc="The description for the automated password change entry in Password Manager settings.">
+-      If Chromium finds one of your passwords in a public data breach, Google Password Manager can offer to change it for you when you're signed in.
++      If Shiny finds one of your passwords in a public data breach, Google Password Manager can offer to change it for you when you're signed in.
+     </message>
+   </else>
+   </if>
+@@ -1141,7 +1141,7 @@
+     </message>
+   </if>
+   <message name="IDS_PASSWORD_MANAGER_UI_PASSWORD_CHANGE_CHECKUP_BUTTON_ARIA_DESCRIPTION" desc="An accessibility description for the automated password change button in Password Manager checkup.">
+-    Let Chromium automatically change password for <ph name="WEBSITE">$1<ex>website.com</ex></ph>
++    Let Shiny automatically change password for <ph name="WEBSITE">$1<ex>website.com</ex></ph>
+   </message>
+   <message name="IDS_PASSWORD_MANAGER_UI_PASSWORD_CHANGE_ATTEMPTING_SIGN_IN" desc="Status text on the button when automated password change is attempting to sign the user in.">
+     Attempting sign-in...
+@@ -1169,7 +1169,7 @@
+   </then>
+   <else>
+     <message name="IDS_SETTINGS_PASSWORD_CHANGE_SUBLABEL_WITH_LEARN_MORE" desc="Sublabel for password change entry in settings. The description of the feature beneath the 'Automated password change' feature title. This and the bullets beneath this paragraph represent the full description of the feature. * 'public' does two things: 1) it provides distance between 'Chrome' and 'data breach', because we don’t want users to associate the breach with Chrome (Chrome didn’t have a data leak, 2) and related, it might reassure the user to know that Chrome is using public information to establish these lists of compromised passwords. * 'Google Password Manager can offer…': The user has to agree to have this feature update their password for them each time. So Google Password Manager is ‘offering’ to do something for the user.">
+-      If Chromium finds one of your passwords in a public data breach, Google Password Manager can offer to change your password for you if you're signed in. <ph name="BEGIN_LINK">&lt;a href="$1" target="_blank"&gt;</ph>More about automated password change<ph name="END_LINK">&lt;/a&gt;</ph>
++      If Shiny finds one of your passwords in a public data breach, Google Password Manager can offer to change your password for you if you're signed in. <ph name="BEGIN_LINK">&lt;a href="$1" target="_blank"&gt;</ph>More about automated password change<ph name="END_LINK">&lt;/a&gt;</ph>
+     </message>
+   </else>
+   </if>
+@@ -1190,7 +1190,7 @@
+     </then>
+     <else>
+       <message name="IDS_PASSWORD_MANAGER_UI_USER_INTERVENTION_NEEDED_TITLE" desc="Title of a dialog shown when the automated password change stops because the website requires identity verification.">
+-        Chromium needs help changing your password
++        Shiny needs help changing your password
+       </message>
+     </else>
+   </if>
+diff --git a/components/autofill_payments_strings.grdp b/components/autofill_payments_strings.grdp
+index 9d9f4795f2..f522c49f1e 100644
+--- a/components/autofill_payments_strings.grdp
++++ b/components/autofill_payments_strings.grdp
+@@ -284,13 +284,13 @@
+     </if>
+     <if expr="not _google_chrome">
+       <message name="IDS_AUTOFILL_SAVE_AND_FILL_DIALOG_EXPLANATION_LOCAL" desc="Explanation text for the Autofill Save and Fill dialog for cards that will be saved locally.">
+-        Autofill this card for purchases made in Chromium when it's saved on this device
++        Autofill this card for purchases made in Shiny when it's saved on this device
+       </message>
+       <message name="IDS_AUTOFILL_SAVE_AND_FILL_DIALOG_EXPLANATION_UPLOAD" desc="Explanation text for the Autofill Save and Fill dialog for cards that will be saved to the GPay server.">
+-        Autofill this card for purchases made in Chromium when it's saved to use with Google Pay
++        Autofill this card for purchases made in Shiny when it's saved to use with Google Pay
+       </message>
+       <message name="IDS_AUTOFILL_SAVE_AND_FILL_TO_WALLET_DIALOG_EXPLANATION_UPLOAD" desc="Explanation text for the Autofill Save and Fill dialog for cards that will be saved to Google Wallet.">
+-        Autofill this card for purchases made in Chromium when it's saved in Google Wallet
++        Autofill this card for purchases made in Shiny when it's saved in Google Wallet
+       </message>
+     </if>
+     <message name="IDS_AUTOFILL_SAVE_AND_FILL_DIALOG_CARD_NUMBER_LABEL" desc="The label text for the card number textfield.">
+@@ -603,13 +603,13 @@
+     </if>
+     <if expr="not _google_chrome">
+       <message name="IDS_PAYMENTS_AUTOFILL_FILLING_MANDATORY_REAUTH" desc="Text that appears in the payments autofill mandatory re-authentication popup as the sublabel, asking the user to authenticate using biometric or device unlock before filling.">
+-        Verify it's you so Chromium can fill in your payment info.
++        Verify it's you so Shiny can fill in your payment info.
+       </message>
+       <message name="IDS_PAYMENTS_AUTOFILL_SETTINGS_TOGGLE_MANDATORY_REAUTH" desc="Text that appears in the payments autofill mandatory re-authentication popup as the sublabel when users try to switch the mandatory reauth settings page toggle, asking the user to authenticate using biometric or device unlock before the toggle is switched.">
+-        Chromium is trying to modify settings for filling payment methods.
++        Shiny is trying to modify settings for filling payment methods.
+       </message>
+       <message name="IDS_PAYMENTS_AUTOFILL_SETTINGS_EDIT_MANDATORY_REAUTH" desc="Text that appears in the payments autofill mandatory re-authentication popup as the sublabel when users try to edit cards in the settings page, asking the user to authenticate using biometric or device unlock first.">
+-        Chromium is trying to edit payment methods.
++        Shiny is trying to edit payment methods.
+       </message>
+     </if>
+   </if>
+diff --git a/components/autofill_strings.grdp b/components/autofill_strings.grdp
+index a4548a5b6d..d48280ad37 100644
+--- a/components/autofill_strings.grdp
++++ b/components/autofill_strings.grdp
+@@ -62,13 +62,13 @@
+   </if>
+   <if expr="not _google_chrome">
+     <message name="IDS_AUTOFILL_DELETE_AUTOCOMPLETE_SUGGESTION_CONFIRMATION_BODY" desc="Text in a dialog to confirm that the user wants to delete an autocomplete form history suggestion.">
+-      Remove form suggestion from Chromium?
++      Remove form suggestion from Shiny?
+     </message>
+     <message name="IDS_AUTOFILL_DELETE_CREDIT_CARD_SUGGESTION_CONFIRMATION_BODY" desc="Text in a dialog to confirm that the user wants to delete a credit card from Autofill.">
+-      Remove credit card from Chromium?
++      Remove credit card from Shiny?
+     </message>
+     <message name="IDS_AUTOFILL_DELETE_PROFILE_SUGGESTION_CONFIRMATION_BODY" desc="Text in a dialog to confirm that the user wants to delete an address from Autofill.">
+-      Remove address from Chromium?
++      Remove address from Shiny?
+     </message>
+   </if>
+   <message name="IDS_AUTOFILL_REMOVE_HOME_PROFILE_SUGGESTION_CONFIRMATION_TITLE" desc="Title in a dialog to confirm that the user wants to delete their Home address from Autofill." formatter_data="android_java">
+@@ -2040,13 +2040,13 @@ You can remove this suggestion from Chrome. Your original source won't be delete
+   </if>
+   <if expr="not _google_chrome">
+     <message name="IDS_SETTINGS_AUTOFILL_AI_TOGGLE_SUB_LABEL" desc="The description of the setting. By 'understand forms better', we mean that when a user submits a form on a website, and if they're using smarter form understanding, this feature can offer to save the user's submitted info. When Chromium saves that info, we save the submitted values and consider the page context." formatter_data="android_java">
+-      Chromium understands forms better and can autofill them faster for you
++      Shiny understands forms better and can autofill them faster for you
+     </message>
+     <message name="IDS_SETTINGS_AUTOFILL_AI_TOGGLE_SUB_LABEL_V2" desc="The description of the setting. This explains to users that Google can process page data in Google servers as a way to provide a better experience. Importantly, it mentions that this is done safely and cannot be viewed by anyone." formatter_data="android_java">
+-      Help Chromium better understand and fill complex forms by securely processing data on Google's servers. Your info remains private and isn't reviewed by anyone.
++      Help Shiny better understand and fill complex forms by securely processing data on Google's servers. Your info remains private and isn't reviewed by anyone.
+     </message>
+     <message name="IDS_SETTINGS_AUTOFILL_AI_WHEN_ON_CAN_FILL_DIFFICULT_FIELDS" desc="Bullet point that appears beneath the 'When on' title when seeing the Smarter Form Understanding description page. This string explains one of the advantages users will get from enabling the feature and serves as a way to incentivize the user to do so." formatter_data="android_java">
+-      Chromium can autofill difficult fields that standard autofill might miss
++      Shiny can autofill difficult fields that standard autofill might miss
+     </message>
+   </if>
+ 
+diff --git a/components/management_strings.grdp b/components/management_strings.grdp
+index 7c7f1dd48a..728cffd2c6 100644
+--- a/components/management_strings.grdp
++++ b/components/management_strings.grdp
+@@ -75,10 +75,10 @@
+       </if>
+       <if expr="not _google_chrome">
+         <message name="IDS_MANAGEMENT_BROWSER_NOTICE" desc="Message shown when the (non-Google-branded) Chromium browser is managed, it indicates what the administrator can do on the browser.">
+-        Your administrator can make changes to your profile and browser remotely, analyze information about the browser through reporting, and perform other necessary tasks. Activity on this device may also be managed outside of Chromium. <ph name="BEGIN_LINK">&lt;a target="_blank" href="$1" aria-label="$2"&gt;</ph>Learn more<ph name="END_LINK">&lt;/a&gt;</ph>
++        Your administrator can make changes to your profile and browser remotely, analyze information about the browser through reporting, and perform other necessary tasks. Activity on this device may also be managed outside of Shiny. <ph name="BEGIN_LINK">&lt;a target="_blank" href="$1" aria-label="$2"&gt;</ph>Learn more<ph name="END_LINK">&lt;/a&gt;</ph>
+         </message>
+         <message name="IDS_MANAGEMENT_NOT_MANAGED_NOTICE" desc="Message indicating that the (non-Google-branded) Chromium browser is not managed">
+-        This browser is not managed by a company or other organization. Activity on this device may be managed outside of Chromium. <ph name="BEGIN_LINK">&lt;a target="_blank" href="$1" aria-label="$2"&gt;</ph>Learn more<ph name="END_LINK">&lt;/a&gt;</ph>
++        This browser is not managed by a company or other organization. Activity on this device may be managed outside of Shiny. <ph name="BEGIN_LINK">&lt;a target="_blank" href="$1" aria-label="$2"&gt;</ph>Learn more<ph name="END_LINK">&lt;/a&gt;</ph>
+         </message>
+       </if>
+       <message name="IDS_MANAGEMENT_PROFILE_NOTICE" desc="Message shown when one profile from the Chrome browser is managed, it indicates what the administrator can do for that profile.">
+diff --git a/components/new_or_sad_tab_strings.grdp b/components/new_or_sad_tab_strings.grdp
+index 21a8aae555..caaf057ce6 100644
+--- a/components/new_or_sad_tab_strings.grdp
++++ b/components/new_or_sad_tab_strings.grdp
+@@ -88,7 +88,7 @@
+       </if>
+       <if expr="not _google_chrome">
+         <message name="IDS_SAD_TAB_RELOAD_RESTART_BROWSER" desc="One of the bullet points displayed on the web page if a reload failed to fix the issue, advising the user to restart Chromium." formatter_data="android_java">
+-          Restart Chromium
++          Restart Shiny
+         </message>
+       </if>
+       <if expr="is_android or is_ios">
+@@ -177,7 +177,7 @@
+       </if>
+       <if expr="not _google_chrome">
+         <message name="IDS_NEW_TAB_OTR_NOT_SAVED" desc="Bullet points listing data that are not saved in the Incognito mode. 'Browsing history' means a history of visited websites. 'Cookies and site data' refers to data saved by websites on the user's device (e.g. sign-in state, preferences, etc.). 'Information entered in forms' refers to names, addresses, passwords etc. that users enter into forms on the web." formatter_data="android_java">
+-          Chromium <ph name="BEGIN_EMPHASIS">&lt;em&gt;</ph>won’t save<ph name="END_EMPHASIS">&lt;/em&gt;</ph>:
++          Shiny <ph name="BEGIN_EMPHASIS">&lt;em&gt;</ph>won’t save<ph name="END_EMPHASIS">&lt;/em&gt;</ph>:
+           <ph name="BEGIN_LIST">&lt;ul&gt;</ph>
+             <ph name="LIST_ITEM">&lt;li&gt;</ph>Your browsing history
+             <ph name="LIST_ITEM">&lt;li&gt;</ph>Cookies and site data
+diff --git a/components/page_info_strings.grdp b/components/page_info_strings.grdp
+index 5a4e88cfdb..641534d6c2 100644
+--- a/components/page_info_strings.grdp
++++ b/components/page_info_strings.grdp
+@@ -108,7 +108,7 @@
+   </if>
+   <if expr="not _google_chrome">
+     <message name="IDS_PAGE_INFO_CHANGE_PASSWORD_DETAILS_SAVED" desc="A short paragraph explaining to a Chromium user that they have reused their saved password on the current website.">
+-      You just entered your password on a deceptive site. To secure your accounts, Chromium recommends checking your saved passwords.
++      You just entered your password on a deceptive site. To secure your accounts, Shiny recommends checking your saved passwords.
+     </message>
+   </if>
+   <if expr="use_titlecase">
+@@ -524,19 +524,19 @@
+     </if>
+     <if expr="not _google_chrome">
+       <message name="IDS_PAGE_INFO_CHANGE_PASSWORD_DETAILS" desc="A short paragraph explaining to the user that they has reuse their google password on current website.">
+-        You could lose access to your Google Account. Chromium recommends changing your password now. You'll be asked to sign in.
++        You could lose access to your Google Account. Shiny recommends changing your password now. You'll be asked to sign in.
+       </message>
+       <message name="IDS_PAGE_INFO_CHANGE_PASSWORD_DETAILS_SYNC" desc="A short paragraph explaining to a Chrome sync user that they have reused their Google password on the current website.">
+-        Chromium can help you protect your Google Account and change your password.
++        Shiny can help you protect your Google Account and change your password.
+       </message>
+       <message name="IDS_PAGE_INFO_CHANGE_PASSWORD_DETAILS_SIGNED_IN_NON_SYNC" desc="A short paragraph explaining to a non-sync user that they have reused their Google password on the current website.">
+-        You just entered your password on a deceptive site. Chromium can help. To change your password and notify Google that your account may be at risk, click Protect Account.
++        You just entered your password on a deceptive site. Shiny can help. To change your password and notify Google that your account may be at risk, click Protect Account.
+       </message>
+       <message name="IDS_PAGE_INFO_CHANGE_PASSWORD_DETAILS_ENTERPRISE" desc="A short paragraph explaining to the user that they have reused their password on the current website.">
+-        You could lose access to your organization's account or experience identity theft. Chromium recommends changing your password now.
++        You could lose access to your organization's account or experience identity theft. Shiny recommends changing your password now.
+       </message>
+       <message name="IDS_PAGE_INFO_CHANGE_PASSWORD_DETAILS_ENTERPRISE_WITH_ORG_NAME" desc="A short paragraph explaining to the user that they have reused their password on the current website.">
+-        You could lose access to your <ph name="ORG_NAME">$1<ex>Google</ex></ph> account or experience identity theft. Chromium recommends changing your password now.
++        You could lose access to your <ph name="ORG_NAME">$1<ex>Google</ex></ph> account or experience identity theft. Shiny recommends changing your password now.
+       </message>
+     </if>
+ 
+diff --git a/components/password_manager_strings.grdp b/components/password_manager_strings.grdp
+index 9e68561526..7010c53501 100644
+--- a/components/password_manager_strings.grdp
++++ b/components/password_manager_strings.grdp
+@@ -52,7 +52,7 @@
+   </if>
+   <if expr="not _google_chrome">
+     <message name="IDS_PASSWORD_MANAGER_LEAK_HELP_MESSAGE" desc="The text is shown in a popup that explains to the user why they are seeing a warning about leaked passwords. This is a stand-alone string and the only content of the popup dialog.">
+-      When you use a password, Chromium warns you if it has been published online. When doing this, your passwords and usernames are encrypted, so they can’t be read by anyone, including Google.
++      When you use a password, Shiny warns you if it has been published online. When doing this, your passwords and usernames are encrypted, so they can’t be read by anyone, including Google.
+     </message>
+   </if>
+   <message name="IDS_MANAGE_PASSWORDS_AUTO_SIGNIN_TITLE" desc="The title of the auto-signin toast.">
+@@ -237,7 +237,7 @@
+       Password Manager needs access to MacOS Keychain
+     </message>
+     <message name="IDS_PASSWORD_MANAGER_RELAUNCH_CHROME_BUBBLE_DESCRIPTION_NON_BRANDED" desc="Text that appears in the description of the relaunch Chromium bubble.">
+-      To use Password Manager with macOS Keychain, relaunch Chromium and allow Keychain access. Your tabs will reopen after relaunching.
++      To use Password Manager with macOS Keychain, relaunch Shiny and allow Keychain access. Your tabs will reopen after relaunching.
+     </message>
+   </if>
+   <if expr="is_linux">
+@@ -251,7 +251,7 @@
+       Password Manager needs more access
+     </message>
+     <message name="IDS_PASSWORD_MANAGER_RELAUNCH_CHROME_BUBBLE_DESCRIPTION_LINUX_NON_BRANDED" desc="Text that appears in the description of the relaunch Chromium bubble.">
+-      To use Password Manager with your operating system, relaunch Chromium and allow access to your computer's password manager. Your tabs will reopen after relaunching.
++      To use Password Manager with your operating system, relaunch Shiny and allow access to your computer's password manager. Your tabs will reopen after relaunching.
+     </message>
+   </if>
+   <if expr="is_win or is_macosx or is_chromeos">
+@@ -277,7 +277,7 @@
+       Relaunch Chrome
+     </message>
+     <message name="IDS_PASSWORD_MANAGER_RELAUNCH_CHROME_BUBBLE_ACCEPT_BUTTON_NON_BRANDED" desc="Text that appears in the accept button of the relaunch Chromium bubble.">
+-      Relaunch Chromium
++      Relaunch Shiny
+     </message>
+     <if expr="use_titlecase">
+       <message name="IDS_PASSWORD_MANAGER_RELAUNCH_CHROME_BUBBLE_CANCEL_BUTTON" desc="Text that appears in the cancel button of the relaunch Chrome bubble.">
+diff --git a/components/privacy_sandbox_strings.grd b/components/privacy_sandbox_strings.grd
+index ff33255260..39804b3b30 100644
+--- a/components/privacy_sandbox_strings.grd
++++ b/components/privacy_sandbox_strings.grd
+@@ -305,7 +305,7 @@
+         </then>
+         <else>
+           <message name="IDS_SETTINGS_COOKIES_BLOCK_THIRD_PARTY_SETTINGS_ALLOW_BULLET_THREE" desc="This text is for a bullet that provides detail about the first setting option. It describes the key new detail that now applies to this setting option." formatter_data="android_java">
+-            When you're in Incognito mode, Chromium blocks sites from using third-party cookies
++            When you're in Incognito mode, Shiny blocks sites from using third-party cookies
+           </message>
+         </else>
+       </if>
+@@ -343,7 +343,7 @@
+         </then>
+         <else>
+           <message name="IDS_PRIVACY_GUIDE_COOKIE_SETTINGS_ALLOW_THINGS_TO_CONSIDER_BULLET_TWO" desc="This text is for a bullet that provides key considerations about the first setting option. It describes the key new detail that now applies to this setting option.">
+-            When you're in Incognito mode, Chromium blocks sites from using third-party cookies
++            When you're in Incognito mode, Shiny blocks sites from using third-party cookies
+           </message>
+         </else>
+       </if>
+diff --git a/components/reset_password_strings.grdp b/components/reset_password_strings.grdp
+index 5f58c26466..89d6bb7577 100644
+--- a/components/reset_password_strings.grdp
++++ b/components/reset_password_strings.grdp
+@@ -40,10 +40,10 @@
+   </if>
+   <if expr="not _google_chrome">
+      <message name="IDS_RESET_PASSWORD_EXPLANATION_PARAGRAPH" desc="The primary explanatory paragraph for the reset password page when the user manually navigates to this page.">
+-      Chromium recommends resetting your password if you reused it on other sites.
++      Shiny recommends resetting your password if you reused it on other sites.
+     </message>
+     <message name="IDS_RESET_PASSWORD_EXPLANATION_PARAGRAPH_WITH_ORG_NAME" desc="The primary explanatory paragraph for the reset password page when the user manually navigates to this page.">
+-      Chromium recommends resetting your <ph name="BEGIN_BOLD">&lt;strong&gt;</ph><ph name="ORG_NAME">$1<ex>Google</ex></ph><ph name="END_BOLD">&lt;/strong&gt;</ph> password if you reused it on other sites.
++      Shiny recommends resetting your <ph name="BEGIN_BOLD">&lt;strong&gt;</ph><ph name="ORG_NAME">$1<ex>Google</ex></ph><ph name="END_BOLD">&lt;/strong&gt;</ph> password if you reused it on other sites.
+     </message>
+   </if>
+ </grit-part>
+diff --git a/components/search_engine_choice_strings.grdp b/components/search_engine_choice_strings.grdp
+index cc85a72337..af7f6de240 100644
+--- a/components/search_engine_choice_strings.grdp
++++ b/components/search_engine_choice_strings.grdp
+@@ -64,7 +64,7 @@
+     </if>
+     <if expr="not _google_chrome">
+       <message name="IDS_SEARCH_ENGINE_CHOICE_PAGE_SUBTITLE_INFO_LINK_A11Y_LABEL" desc="Accessibility label for the “Learn more” link in the search engine choice screen. Clicking the link will open a card that explains why users are being prompted to choose a search engine, and what a search engine does in Chromium.">
+-        Learn more about your search engine in Chromium
++        Learn more about your search engine in Shiny
+       </message>
+     </if>
+ 
+@@ -116,25 +116,25 @@
+     <if expr="not _google_chrome">
+       <if expr="use_titlecase">
+         <message name="IDS_SEARCH_ENGINE_CHOICE_INFO_DIALOG_TITLE" desc="This string is the heading of a card that explains why users are being prompted to choose a search engine, and what a search engine does in Chromium. (A search engine provides answers to search queries; this is different from a browser, which displays web pages. A search engine powers many experiences within a browser.) This screen appears when the user taps or clicks “Learn more” on the search engine choice screen. This string is before the “Based on a law in your region...” string. We want users to read this screen and understand that they can use any search engine with Chromium and what the impact of their choice might be.">
+-          Your Search Engine in Chromium
++          Your Search Engine in Shiny
+         </message>
+       </if>
+       <if expr="not use_titlecase">
+         <message name="IDS_SEARCH_ENGINE_CHOICE_INFO_DIALOG_TITLE" desc="This string is the heading of a card that explains why users are being prompted to choose a search engine, and what a search engine does in Chromium. (A search engine provides answers to search queries; this is different from a browser, which displays web pages. A search engine powers many experiences within a browser.) This screen appears when the user taps or clicks “Learn more” on the search engine choice screen. This string is before the “Based on a law in your region...” string. We want users to read this screen and understand that they can use any search engine with Chromium and what the impact of their choice might be.">
+-          Your search engine in Chromium
++          Your search engine in Shiny
+         </message>
+       </if>
+       <message name="IDS_SEARCH_ENGINE_CHOICE_INFO_DIALOG_BODY_FIRST_PARAGRAPH" desc="This is the first paragraph of the body text of a card that explains why users are being prompted to choose a search engine, and what a search engine does in Chrome. This screen provides the following details: 1. the list includes search engines that are popular in the user’s region and the order includes randomization (not in order of recommendation); 2. features may be unavailable if the chosen default search engine doesn’t support them; 3. the user can change their mind at any time. This card appears when the user taps or clicks “Learn more” on the search engine choice screen. The headline for this card is “Your search engine in Chromium”.">
+-        Based on a law in your region, Chromium asks you to choose your default search engine. These search engines are popular in your region and are shown in random order.
++        Based on a law in your region, Shiny asks you to choose your default search engine. These search engines are popular in your region and are shown in random order.
+       </message>
+       <message name="IDS_SEARCH_ENGINE_CHOICE_INFO_DIALOG_BODY_SECOND_PARAGRAPH" desc="This is the second paragraph of the body text of a card that explains why users are being prompted to choose a search engine, and what a search engine does in Chromium. This screen provides the following details: 1. the list includes search engines that are popular in the user’s region and the order includes randomization (not in order of recommendation); 2. features may be unavailable if the chosen default search engine doesn’t support them; 3. the user can change their mind at any time. This card appears when the user taps or clicks “Learn more” on the search engine choice screen. The headline for this card is “Your search engine in Chromium”.">
+-        <ph name="BEGIN_BOLD">&lt;b&gt;</ph>Your default search engine lets you search the web and powers Chromium features<ph name="END_BOLD">&lt;/b&gt;</ph> like searching from the address bar and from images on web pages. A feature might not be available if your search engine doesn’t support it.
++        <ph name="BEGIN_BOLD">&lt;b&gt;</ph>Your default search engine lets you search the web and powers Shiny features<ph name="END_BOLD">&lt;/b&gt;</ph> like searching from the address bar and from images on web pages. A feature might not be available if your search engine doesn’t support it.
+       </message>
+       <message name="IDS_SEARCH_ENGINE_CHOICE_INFO_DIALOG_BODY_THIRD_PARAGRAPH" desc="This is the third paragraph of the body text of a card that explains why users are being prompted to choose a search engine, and what a search engine does in Chromium. This screen provides the following details: 1. the list includes search engines that are popular in the user’s region and the order includes randomization (not in order of recommendation); 2. features may be unavailable if the chosen default search engine doesn’t support them; 3. the user can change their mind at any time. This card appears when the user taps or clicks “Learn more” on the search engine choice screen. The headline for this card is “Your search engine in Chromium”.">
+-        You can change your search engine anytime in Chromium’s settings.
++        You can change your search engine anytime in Shiny’s settings.
+       </message>
+       <message name="IDS_SEARCH_ENGINE_CHOICE_INFO_DIALOG_BODY_THIRD_PARAGRAPH_INSTRUCTIVE" desc="This is the third paragraph of the body text of a card that explains why users are being prompted to choose a search engine, and what a search engine does in Chromium. This screen provides the following details: 1. the list includes search engines that are popular in the user’s region and the order includes randomization (not in order of recommendation); 2. features may be unavailable if the chosen default search engine doesn’t support them; 3. the user can change their mind at any time. For JSA, we add more information on how to add non-regional search engines. This card appears when the user taps or clicks “Learn more” on the search engine choice screen. The headline for this card is “Your search engine in Chromium”.">
+-        You can change your search engine anytime in Chromium’s settings. If you don’t see your preferred search engine, you can perform a search from their site. You’ll see it listed as a recently visited search engine in Chromium settings, and you can make it your default.
++        You can change your search engine anytime in Shiny’s settings. If you don’t see your preferred search engine, you can perform a search from their site. You’ll see it listed as a recently visited search engine in Shiny settings, and you can make it your default.
+       </message>
+     </if>
+ 
+diff --git a/components/security_interstitials_strings.grdp b/components/security_interstitials_strings.grdp
+index 690bb1b9a5..f563ecb008 100644
+--- a/components/security_interstitials_strings.grdp
++++ b/components/security_interstitials_strings.grdp
+@@ -174,7 +174,7 @@
+   </if>
+   <if expr="not _google_chrome">
+     <message name="IDS_CLOCK_ERROR_EXPLANATION" desc="Body text under an 'Advanced' button. Context: error shown when the browser can't load a page because the device's clock is wrong. This paragraph explains why a correct clock is necessary.">
+-      To establish a secure connection, your clock needs to be set correctly. This is because the certificates that websites use to identify themselves are only valid for specific periods of time. Since your device's clock is incorrect, Chromium cannot verify these certificates.
++      To establish a secure connection, your clock needs to be set correctly. This is because the certificates that websites use to identify themselves are only valid for specific periods of time. Since your device's clock is incorrect, Shiny cannot verify these certificates.
+     </message>
+   </if>
+ 
+@@ -223,10 +223,10 @@
+   </if>
+   <if expr="not _google_chrome">
+     <message name="IDS_SSL_NONOVERRIDABLE_MORE" desc="Body text for the explanation shown if user clicks on the Details button.">
+-      <ph name="SITE">$1<ex>google.com</ex></ph> normally uses encryption to protect your information. When Chromium tried to connect to <ph name="SITE">$1<ex>google.com</ex></ph> this time, the website sent back unusual and incorrect credentials. This may happen when an attacker is trying to pretend to be <ph name="SITE">$1<ex>google.com</ex></ph>, or a Wi-Fi sign-in screen has interrupted the connection. Your information is still secure because Chromium stopped the connection before any data was exchanged.
++      <ph name="SITE">$1<ex>google.com</ex></ph> normally uses encryption to protect your information. When Shiny tried to connect to <ph name="SITE">$1<ex>google.com</ex></ph> this time, the website sent back unusual and incorrect credentials. This may happen when an attacker is trying to pretend to be <ph name="SITE">$1<ex>google.com</ex></ph>, or a Wi-Fi sign-in screen has interrupted the connection. Your information is still secure because Shiny stopped the connection before any data was exchanged.
+     </message>
+     <message name="IDS_SSL_NONOVERRIDABLE_INVALID" desc="A sentence to explain why the user can't proceed.">
+-      You cannot visit <ph name="SITE">$1<ex>google.com</ex></ph> right now because the website sent scrambled credentials that Chromium cannot process. Network errors and attacks are usually temporary, so this page will probably work later.
++      You cannot visit <ph name="SITE">$1<ex>google.com</ex></ph> right now because the website sent scrambled credentials that Shiny cannot process. Network errors and attacks are usually temporary, so this page will probably work later.
+     </message>
+   </if>
+ 
+@@ -444,7 +444,7 @@
+     </if>
+     <if expr="not _google_chrome">
+       <message name="IDS_KNOWN_INTERCEPTION_BODY2" desc="Second body text for the chrome://connection-monitoring-detected/ page with more details">
+-        This problem happens because of a certificate you or someone else installed on your device. The certificate is known to be used to monitor and intercept networks, and is not trusted by Chromium. While some legitimate cases for monitoring do exist, like on a school or company network, Chromium wants to make sure you're aware it's happening, even if you can't stop it. Monitoring may happen in any browser or application that accesses the web.
++        This problem happens because of a certificate you or someone else installed on your device. The certificate is known to be used to monitor and intercept networks, and is not trusted by Shiny. While some legitimate cases for monitoring do exist, like on a school or company network, Shiny wants to make sure you're aware it's happening, even if you can't stop it. Monitoring may happen in any browser or application that accesses the web.
+       </message>
+     </if>
+ 
+diff --git a/components/ssl_errors_strings.grdp b/components/ssl_errors_strings.grdp
+index b071895a60..e82ae922b5 100644
+--- a/components/ssl_errors_strings.grdp
++++ b/components/ssl_errors_strings.grdp
+@@ -158,7 +158,7 @@
+   <if expr="not _google_chrome">
+     <if expr="is_ios">
+       <message name="IDS_CERT_ERROR_AUTHORITY_INVALID_DETAILS" desc="Details for an X509 certificate with an invalid authority">
+-        This server could not prove that it is <ph name="DOMAIN">&lt;strong&gt;$1<ex>paypal.com</ex>&lt;/strong&gt;</ph>; its security certificate is not trusted by Chromium. This may be caused by a misconfiguration or an attacker intercepting your connection.
++        This server could not prove that it is <ph name="DOMAIN">&lt;strong&gt;$1<ex>paypal.com</ex>&lt;/strong&gt;</ph>; its security certificate is not trusted by Shiny. This may be caused by a misconfiguration or an attacker intercepting your connection.
+       </message>
+     </if>
+     <if expr="is_android">
+@@ -188,12 +188,12 @@
+   <if expr="not _google_chrome">
+     <if expr="is_ios or is_android">
+       <message name="IDS_CERT_ERROR_AUTHORITY_INVALID_DETAILS_V2" desc="Details for an X509 certificate with an invalid authority, V2.">
+-        This server could not prove that it is <ph name="DOMAIN">&lt;strong&gt;$1<ex>paypal.com</ex>&lt;/strong&gt;</ph> because it is using a security certificate that is not trusted by Chromium or your system configuration for web traffic encryption. This may be caused by a misconfiguration, or an attacker intercepting your connection.
++        This server could not prove that it is <ph name="DOMAIN">&lt;strong&gt;$1<ex>paypal.com</ex>&lt;/strong&gt;</ph> because it is using a security certificate that is not trusted by Shiny or your system configuration for web traffic encryption. This may be caused by a misconfiguration, or an attacker intercepting your connection.
+       </message>
+     </if>
+     <if expr="not is_ios and not is_android">
+       <message name="IDS_CERT_ERROR_AUTHORITY_INVALID_DETAILS_V2" desc="Details for an X509 certificate with an invalid authority, V2.">
+-        This server could not prove that it is <ph name="DOMAIN">&lt;strong&gt;$1<ex>paypal.com</ex>&lt;/strong&gt;</ph> because it is using a security certificate that is not trusted by Chromium or your system configuration for web traffic encryption. This may be caused by a misconfiguration, or an attacker intercepting your connection. <ph name="BEGIN_VIEW_CERTIFICATE_LINK">&lt;a href="#" id="view-certificate-link"&gt;</ph>View Certificate<ph name="END_VIEW_CERTIFICATE_LINK">&lt;/a&gt;</ph>
++        This server could not prove that it is <ph name="DOMAIN">&lt;strong&gt;$1<ex>paypal.com</ex>&lt;/strong&gt;</ph> because it is using a security certificate that is not trusted by Shiny or your system configuration for web traffic encryption. This may be caused by a misconfiguration, or an attacker intercepting your connection. <ph name="BEGIN_VIEW_CERTIFICATE_LINK">&lt;a href="#" id="view-certificate-link"&gt;</ph>View Certificate<ph name="END_VIEW_CERTIFICATE_LINK">&lt;/a&gt;</ph>
+       </message>
+     </if>
+   </if>
