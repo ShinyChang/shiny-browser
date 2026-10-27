@@ -62,7 +62,7 @@ only connections you started. The same page turns the server off.
 browser and its WebMCP tools:
 
     npx chrome-devtools-mcp@latest --autoConnect --categoryExperimentalWebmcp=true \
-      --userDataDir "$HOME/Library/Application Support/Chromium"
+      --userDataDir "$HOME/Library/Application Support/Chromium IDE"
 
 ### Also
 
