@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # Builds Shiny: Chromium at CHROMIUM_VERSION plus patches/, compiled with args.gn.
 #
-#   scripts/build.sh WORKDIR
+#   scripts/build.sh WORKDIR [VERSION]
 #
 # WORKDIR receives depot_tools (unless gclient is already on PATH), the Chromium
-# checkout and src/out/Release/Shiny.app. Rerunning it resumes an interrupted
-# fetch or build. JOBS caps the parallel compile jobs.
+# checkout and src/out/Release/Shiny.app. VERSION overrides CHROMIUM_VERSION.
+# Rerunning it resumes an interrupted fetch or build. JOBS caps the parallel compile jobs.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-WORK="${1:?usage: scripts/build.sh WORKDIR}"
+WORK="${1:?usage: scripts/build.sh WORKDIR [VERSION]}"
 mkdir -p "$WORK"
 WORK="$(cd "$WORK" && pwd)"
-VERSION="$(tr -d '[:space:]' < "$REPO/CHROMIUM_VERSION")"
+VERSION="${2:-$(tr -d '[:space:]' < "$REPO/CHROMIUM_VERSION")}"
 SRC="$WORK/src"
 BASE="base-$VERSION"
 OUT="out/Release"
@@ -55,6 +55,8 @@ fi
 STAMP="$BASE-$(cat "$REPO"/patches/*.patch | git hash-object --stdin)"
 if [ "$(git -C "$SRC" config --get shiny.applied || true)" != "$STAMP" ]; then
   echo "Applying patches"
+  # A conflict left by an earlier run would block git am; the patches are applied afresh anyway.
+  git -C "$SRC" am --abort > /dev/null 2>&1 || true
   git -C "$SRC" checkout -q -B shiny "$BASE"
   # git am needs a committer; these commits never leave the checkout.
   git -C "$SRC" -c user.name=shiny-build -c user.email=shiny-build@localhost -c commit.gpgsign=false \

@@ -91,9 +91,13 @@ code-signing identity instead.
 ## Updates
 
 A daily GitHub Actions job compares Chrome stable for Mac with `CHROMIUM_VERSION` and opens a
-`chrome-update` issue when a newer version ships. Shiny is then rebuilt on that version in a new
-work directory, and `scripts/export-patches.sh` writes the rebased commits back to `patches/`,
-`lottie-preview/` and `CHROMIUM_VERSION`. The issue is closed with that commit.
+`chrome-update` issue when a newer version ships. On the build Mac, launchd runs
+`scripts/auto-build.sh` every four hours: it makes the same check, builds a new version in a work
+directory of its own, runs the `AFTER_BUILD` command on it and, when gh is logged in, comments the
+result on the issue. On the build Mac that command runs the Lottie tests and then publishes the
+build as an update (below), so installed copies offer it within hours. Once that build is
+installed, `scripts/export-patches.sh` writes the rebased commits back to `patches/`,
+`lottie-preview/` and `CHROMIUM_VERSION`, and the issue is closed with that commit.
 
 `scripts/publish-update.sh Shiny.app UPDATES_DIR` turns a build into a
 [Sparkle](https://sparkle-project.org) update: it adds Sparkle, signs the app and writes the

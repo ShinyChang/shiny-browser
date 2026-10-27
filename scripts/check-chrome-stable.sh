@@ -19,7 +19,7 @@ Chrome stable for Mac is now **$latest** (Shiny is on $current).
 - Version history: https://versionhistory.googleapis.com/v1/chrome/platforms/mac/channels/stable/versions
 
 Update checklist:
-- [ ] Set CHROMIUM_VERSION to $latest and run scripts/build.sh in a new WORKDIR; it stops at a patch that no longer applies
+- [ ] Studio builds it with scripts/auto-build.sh; a patch that no longer applies stops the build
 - [ ] Smoke test
 - [ ] Install on the MacBook
 - [ ] Run scripts/export-patches.sh, commit, close this issue
