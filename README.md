@@ -12,7 +12,8 @@ https://github.com/user-attachments/assets/feca5615-e634-4ed0-a52b-7ea9269ca795
 ### Go to Anything (Cmd+T)
 
 Open tabs, history and recently closed tabs in one fuzzy-matched list. Anything else opens as a
-URL or a search.
+URL or a search. Beside the list, a preview shows the selected entry, with a picture of the page
+when it is an open tab.
 
 ![Go to Anything matching "chrom" against open tabs and history](docs/screenshots/go-to-anything.webp)
 

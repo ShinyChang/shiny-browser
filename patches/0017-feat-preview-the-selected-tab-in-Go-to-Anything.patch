@@ -1,0 +1,265 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shiny <owner@shinychang.net>
+Date: Wed, 28 Oct 2026 07:12:42 +0800
+Subject: [PATCH] feat: preview the selected tab in Go to Anything
+
+- Beside the list, Go to Anything shows the selected entry's title and
+  address, with a picture of the page when it is an open tab.
+- Tab thumbnails are captured on Mac too (kTabHoverCardImages on), so
+  the preview has an image to show. A tab restored from the last
+  session keeps its icon instead, because observing its thumbnail
+  would load it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
+---
+ chrome/browser/ui/BUILD.gn                 |   1 +
+ chrome/browser/ui/ui_features.cc           |   9 +-
+ chrome/browser/ui/views/ide/ide_palette.cc | 121 ++++++++++++++++++++-
+ 3 files changed, 122 insertions(+), 9 deletions(-)
+
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index 91ed593130..5475cd661f 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -3543,6 +3543,7 @@ static_library("ui") {
+       "views/ide/ide_palette.h",
+       "views/ide/ide_split.cc",
+     ]
++    deps += [ "//chrome/browser/ui/thumbnails" ]
+     if (is_mac) {
+       sources += [ "views/ide/ide_mac.mm" ]
+       deps += [ "//chrome/browser/ui/webui/help" ]
+diff --git a/chrome/browser/ui/ui_features.cc b/chrome/browser/ui/ui_features.cc
+index ad09b2f13b..f28a4c2c0b 100644
+--- a/chrome/browser/ui/ui_features.cc
++++ b/chrome/browser/ui/ui_features.cc
+@@ -266,13 +266,8 @@ BASE_FEATURE(kNewTabButtonContextMenu, base::FEATURE_ENABLED_BY_DEFAULT);
+ 
+ // Enables preview images in tab-hover cards.
+ // https://crbug.com/41439486
+-BASE_FEATURE(kTabHoverCardImages,
+-#if BUILDFLAG(IS_MAC)
+-             base::FEATURE_DISABLED_BY_DEFAULT
+-#else
+-             base::FEATURE_ENABLED_BY_DEFAULT
+-#endif
+-);
++// Shy captures them on Mac too, for Go to Anything's tab preview.
++BASE_FEATURE(kTabHoverCardImages, base::FEATURE_ENABLED_BY_DEFAULT);
+ 
+ BASE_FEATURE(kTabModalUsesDesktopWidget, base::FEATURE_DISABLED_BY_DEFAULT);
+ 
+diff --git a/chrome/browser/ui/views/ide/ide_palette.cc b/chrome/browser/ui/views/ide/ide_palette.cc
+index b9e2d57887..25ff6b8209 100644
+--- a/chrome/browser/ui/views/ide/ide_palette.cc
++++ b/chrome/browser/ui/views/ide/ide_palette.cc
+@@ -36,6 +36,8 @@
+ #include "chrome/browser/ui/navigator/browser_navigator.h"
+ #include "chrome/browser/ui/navigator/browser_navigator_params.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "chrome/browser/ui/thumbnails/thumbnail_image.h"
++#include "chrome/browser/ui/thumbnails/thumbnail_tab_helper.h"
+ #include "chrome/browser/ui/views/download/bubble/download_toolbar_ui_controller.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "chrome/browser/ui/views/ide/ide_internal.h"
+@@ -48,8 +50,10 @@
+ #include "components/omnibox/browser/autocomplete_match.h"
+ #include "components/sessions/core/tab_restore_service.h"
+ #include "components/sessions/core/tab_restore_types.h"
++#include "components/tabs/public/tab_interface.h"
+ #include "components/url_formatter/url_formatter.h"
+ #include "components/vector_icons/vector_icons.h"
++#include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/web_contents.h"
+ #include "extensions/common/constants.h"
+ #include "third_party/metrics_proto/omnibox_event.pb.h"
+@@ -60,8 +64,11 @@
+ #include "ui/base/page_transition_types.h"
+ #include "ui/base/window_open_disposition.h"
+ #include "ui/color/color_id.h"
++#include "ui/compositor/layer.h"
+ #include "ui/events/event.h"
+ #include "ui/events/keycodes/keyboard_codes.h"
++#include "ui/gfx/geometry/rounded_corners_f.h"
++#include "ui/gfx/image/image_skia.h"
+ #include "ui/gfx/text_elider.h"
+ #include "ui/views/accessibility/view_accessibility.h"
+ #include "ui/views/background.h"
+@@ -74,6 +81,7 @@
+ #include "ui/views/controls/textfield/textfield.h"
+ #include "ui/views/controls/textfield/textfield_controller.h"
+ #include "ui/views/layout/box_layout.h"
++#include "ui/views/layout/fill_layout.h"
+ #include "ui/views/style/typography.h"
+ #include "ui/views/style/typography_provider.h"
+ #include "ui/views/view_tracker.h"
+@@ -95,6 +103,10 @@ constexpr size_t kMaxClosed = 3;
+ constexpr int kListMaxHeight = 470;
+ constexpr int kTitleWidth = 430;
+ constexpr int kRowRadius = 6;
++constexpr int kPreviewGap = 12;
++// About the shape of a browser window's page area.
++constexpr gfx::Size kPreviewSize(300, 188);
++constexpr int kPreviewIconSize = 32;
+ 
+ // Palette entries with no IDC equivalent.
+ enum SpecialCommand {
+@@ -405,7 +417,13 @@ class PaletteContents : public views::View, public views::TextfieldController {
+                                    : u"Type a command");
+     input_->GetViewAccessibility().SetName(PaletteTitle(mode));
+ 
+-    auto* scroll = AddChildView(std::make_unique<views::ScrollView>());
++    auto* body = AddChildView(std::make_unique<views::View>());
++    auto* body_layout = body->SetLayoutManager(std::make_unique<views::BoxLayout>(
++        views::BoxLayout::Orientation::kHorizontal, gfx::Insets(), kPreviewGap));
++    body_layout->set_cross_axis_alignment(
++        views::BoxLayout::CrossAxisAlignment::kStart);
++    auto* scroll = body->AddChildView(std::make_unique<views::ScrollView>());
++    body_layout->SetFlexForView(scroll, 1);
+     scroll->SetHorizontalScrollBarMode(
+         views::ScrollView::ScrollBarMode::kDisabled);
+     scroll->SetDrawOverflowIndicator(false);
+@@ -413,6 +431,9 @@ class PaletteContents : public views::View, public views::TextfieldController {
+     list_ = scroll->SetContents(std::make_unique<views::View>());
+     list_->SetLayoutManager(std::make_unique<views::BoxLayout>(
+         views::BoxLayout::Orientation::kVertical));
++    if (mode == PaletteMode::kGoto) {
++      AddPreview(body);
++    }
+ 
+     footer_ = AddChildView(std::make_unique<views::Label>(
+         std::u16string(), views::style::CONTEXT_LABEL,
+@@ -473,6 +494,92 @@ class PaletteContents : public views::View, public views::TextfieldController {
+   }
+ 
+  private:
++  void AddPreview(views::View* parent) {
++    auto* preview = parent->AddChildView(std::make_unique<views::View>());
++    preview->SetLayoutManager(std::make_unique<views::BoxLayout>(
++        views::BoxLayout::Orientation::kVertical, gfx::Insets(), 4));
++    auto* frame = preview->AddChildView(std::make_unique<views::View>());
++    frame->SetPreferredSize(kPreviewSize);
++    frame->SetLayoutManager(std::make_unique<views::FillLayout>());
++    frame->SetBackground(views::CreateRoundedRectBackground(
++        ui::kColorSubtleEmphasisBackground, kRowRadius));
++    frame->SetPaintToLayer();
++    frame->layer()->SetFillsBoundsOpaquely(false);
++    frame->layer()->SetRoundedCornerRadius(gfx::RoundedCornersF(kRowRadius));
++    frame->layer()->SetMasksToBounds(true);
++    preview_icon_ = frame->AddChildView(std::make_unique<views::ImageView>());
++    preview_icon_->SetImageSize(gfx::Size(kPreviewIconSize, kPreviewIconSize));
++    preview_thumbnail_ =
++        frame->AddChildView(std::make_unique<views::ImageView>());
++    preview_thumbnail_->SetImageSize(kPreviewSize);
++    preview_thumbnail_->SetVisible(false);
++    preview_title_ = preview->AddChildView(std::make_unique<views::Label>(
++        std::u16string(), views::style::CONTEXT_LABEL,
++        views::style::STYLE_PRIMARY));
++    preview_url_ = preview->AddChildView(std::make_unique<views::Label>(
++        std::u16string(), views::style::CONTEXT_LABEL,
++        views::style::STYLE_SECONDARY));
++    for (views::Label* label : {preview_title_.get(), preview_url_.get()}) {
++      label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++      label->SetElideBehavior(gfx::ELIDE_TAIL);
++      label->SetMaximumWidthSingleLine(kPreviewSize.width());
++    }
++  }
++
++  // A tab restored from the last session has not loaded yet, and observing
++  // its thumbnail would load it.
++  static scoped_refptr<ThumbnailImage> ThumbnailFor(const Item& item) {
++    content::WebContents* contents = item.contents.get();
++    if (item.kind != Item::Kind::kOpenTab || !contents ||
++        (contents->GetController().NeedsReload() &&
++         !contents->WasDiscarded())) {
++      return nullptr;
++    }
++    tabs::TabInterface* tab = tabs::TabInterface::MaybeGetFromContents(contents);
++    ThumbnailTabHelper* helper = tab ? ThumbnailTabHelper::From(tab) : nullptr;
++    return helper ? helper->thumbnail() : nullptr;
++  }
++
++  // Shows the selected row's icon until its tab's thumbnail arrives.
++  void UpdatePreview() {
++    if (!preview_icon_) {
++      return;
++    }
++    const Item* item = selected_ < shown_.size() ? &shown_[selected_] : nullptr;
++    preview_title_->SetText(item ? item->row.title : std::u16string());
++    preview_url_->SetText(item ? item->row.detail : std::u16string());
++    scoped_refptr<ThumbnailImage> thumbnail =
++        item ? ThumbnailFor(*item) : nullptr;
++    // The list is rebuilt as history results arrive; the tab still selected
++    // keeps the image it shows.
++    if (thumbnail && thumbnail == thumbnail_) {
++      return;
++    }
++    preview_icon_->SetImage(item ? item->row.icon : ui::ImageModel());
++    preview_icon_->SetVisible(true);
++    preview_thumbnail_->SetVisible(false);
++    subscription_.reset();
++    thumbnail_ = std::move(thumbnail);
++    if (!thumbnail_) {
++      return;
++    }
++    subscription_ = thumbnail_->Subscribe();
++    subscription_->SetSizeHint(kPreviewSize);
++    subscription_->SetUncompressedImageCallback(base::BindRepeating(
++        &PaletteContents::OnThumbnail, base::Unretained(this),
++        base::Unretained(thumbnail_.get())));
++    thumbnail_->RequestThumbnailImage();
++  }
++
++  void OnThumbnail(const ThumbnailImage* thumbnail, gfx::ImageSkia image) {
++    if (thumbnail != thumbnail_.get() || image.isNull()) {
++      return;
++    }
++    preview_thumbnail_->SetImage(ui::ImageModel::FromImageSkia(image));
++    preview_thumbnail_->SetVisible(true);
++    preview_icon_->SetVisible(false);
++  }
++
+   std::u16string Query() const {
+     return std::u16string(
+         base::TrimWhitespace(input_->GetText(), base::TRIM_ALL));
+@@ -780,6 +887,7 @@ class PaletteContents : public views::View, public views::TextfieldController {
+                   base::NumberToString16(tab_count_) + u" tabs open"
+             : u"↑↓ select   ↵ run   esc close   ⌘T tabs and URLs");
+     list_->InvalidateLayout();
++    UpdatePreview();
+     resize_.Run();
+     if (selected_ < rows_.size()) {
+       rows_[selected_]->ScrollViewToVisible();
+@@ -796,6 +904,7 @@ class PaletteContents : public views::View, public views::TextfieldController {
+     selected_ = index;
+     SetRowSelected(rows_[selected_], true);
+     rows_[selected_]->ScrollViewToVisible();
++    UpdatePreview();
+   }
+ 
+   void MoveSelection(int delta) {
+@@ -825,6 +934,12 @@ class PaletteContents : public views::View, public views::TextfieldController {
+   raw_ptr<views::Textfield> input_ = nullptr;
+   raw_ptr<views::View> list_ = nullptr;
+   raw_ptr<views::Label> footer_ = nullptr;
++  raw_ptr<views::ImageView> preview_icon_ = nullptr;
++  raw_ptr<views::ImageView> preview_thumbnail_ = nullptr;
++  raw_ptr<views::Label> preview_title_ = nullptr;
++  raw_ptr<views::Label> preview_url_ = nullptr;
++  scoped_refptr<ThumbnailImage> thumbnail_;
++  std::unique_ptr<ThumbnailImage::Subscription> subscription_;
+   std::vector<raw_ptr<views::View>> rows_;
+   std::vector<Item> sync_items_;
+   std::vector<Item> closed_;
+@@ -852,7 +967,9 @@ class PaletteBubble : public views::BubbleDialogDelegate {
+     SetShowCloseButton(false);
+     SetTitle(PaletteTitle(mode));
+     SetShowTitle(false);
+-    set_fixed_width(kPaletteWidth);
++    set_fixed_width(mode == PaletteMode::kGoto
++                        ? kPaletteWidth + kPreviewGap + kPreviewSize.width()
++                        : kPaletteWidth);
+     set_margins(gfx::Insets(8));
+     set_adjust_if_offscreen(false);
+     auto* contents = SetContentsView(std::make_unique<PaletteContents>(
