@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Talk to Shy",
-  "version": "0.2.1",
+  "version": "0.5.0",
   "description": "Lets an agent you trust read and use the sites you allow, with every call shown in a side panel.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4QZO4SO7Uu5A0Of3r7b1PCaFlLFNyu/Dq3dvnTcvKLi204zeuGBP29g6wqB+W8rbIcBrSo958u2y3fQqycvkbzMfeWc4uCLJ19GIBVrvR6YB9MeagvGMM07l1mZREMRZfm5OF/e0xBpUhOnBAfArqe8uZ+vUcKdjojkeRJJOWY3iv3FLujK9p1CZ76UOL2tRNoqIa654f/f+ntcr59d+6szlXGJjIFnScRP9mthLSX7UevHh0bItJ0bNG/fjIvzvp5vObR7lIRizJUda8fYqXdePKLiNakgtF5n5yZ7T3k/Zt4cmV0rkxDacPWCC2dJcxvVVLpraG7JnABI1d0ZdMQIDAQAB",
   "icons": {
@@ -9,11 +9,13 @@
   },
   "permissions": [
     "alarms",
+    "debugger",
     "notifications",
     "scripting",
     "sidePanel",
     "storage",
-    "tabs"
+    "tabs",
+    "unlimitedStorage"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -28,5 +30,14 @@
   "action": {
     "default_title": "Talk to Shy",
     "default_icon": "icon.png"
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S",
+        "mac": "Command+Shift+S"
+      },
+      "description": "Open Talk to Shy"
+    }
   }
 }

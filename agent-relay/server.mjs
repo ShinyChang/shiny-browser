@@ -1,8 +1,10 @@
 // Shy's Talk to Shy extension can only open connections, so agents reach it
 // through this relay: MCP over HTTP for agents, a WebSocket for the extension.
-// An OpenAB agent can also connect to /gateway, so the user can chat with it from the panel.
+// The panel's chat goes to a Slack thread when SLACK_CHANNEL is set and a Slack user token is
+// in SLACK_TOKEN_FILE; otherwise an OpenAB agent can connect to /gateway to chat.
 //
 //   PORT=8796 TOKEN_FILE=~/.config/shy/token node server.mjs
+//   SLACK_CHANNEL=C0123 SLACK_AGENT=U0456 SLACK_AGENT_NAME=fugu node server.mjs
 //
 // Agents send the token as a bearer token, OpenAB as ?token=, and the extension in its first message.
 // Publish only /extension (through a Cloudflare Tunnel, say); /mcp and /gateway stay local.
@@ -10,6 +12,7 @@ import http from 'node:http';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { WebSocketServer } from 'ws';
+import { slackChat } from './slack.mjs';
 
 const PORT = Number(process.env.PORT ?? 8796);
 // cloudflared and OrbStack containers (through host.docker.internal) both reach loopback.
@@ -44,7 +47,7 @@ const TOOLS = [
   },
   {
     name: 'call_webmcp_tool',
-    description: 'Runs one of the WebMCP tools a page offers and returns its output. Read-only tools run at once; a tool that changes the page waits until the user allows it in Shy, and fails if they decline or do not answer within about two minutes.',
+    description: 'Runs one of the WebMCP tools a page offers and returns its output. If the user turned off "Use and drive any site without asking" in Shy, a tool that changes the page waits until they allow it, and fails if they decline or do not answer within about two minutes.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -53,6 +56,90 @@ const TOOLS = [
         input: { type: 'object', description: "The tool's input, matching its input schema." },
       },
       required: ['name'],
+    },
+  },
+  {
+    name: 'screenshot',
+    description: 'Returns an image of what a tab shows right now (its visible area, in CSS pixels, so a point in the image is a point click takes).',
+    inputSchema: { type: 'object', properties: { tabId } },
+  },
+  {
+    name: 'run_script',
+    description: "Runs JavaScript in the page and returns its result: the value of the last expression, awaited if it is a promise, so return plain data. Top-level await works. A function body with a top-level return also works. It is not limited by the page's CSP.",
+    inputSchema: {
+      type: 'object',
+      properties: { tabId, code: { type: 'string', description: 'The JavaScript to run.' } },
+      required: ['code'],
+    },
+  },
+  {
+    name: 'click',
+    description: 'Clicks with real mouse events, at a point (CSS pixels, as in screenshot) or at the middle of the first element a CSS selector matches, scrolled into view. Prefer a selector: it survives scrolling and layout changes.',
+    inputSchema: {
+      type: 'object',
+      properties: { tabId, x: { type: 'number' }, y: { type: 'number' }, selector: { type: 'string', description: 'Clicks this element instead of a point.' } },
+    },
+  },
+  {
+    name: 'type_text',
+    description: 'Types text, as if pasted from a keyboard, into the focused element, or into the element a CSS selector matches after clicking it.',
+    inputSchema: {
+      type: 'object',
+      properties: { tabId, text: { type: 'string' }, selector: { type: 'string' } },
+      required: ['text'],
+    },
+  },
+  {
+    name: 'press_key',
+    description: 'Presses one key, such as Enter, Escape, Tab, Backspace, ArrowDown or a character, with optional modifiers.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId,
+        key: { type: 'string' },
+        modifiers: { type: 'array', items: { type: 'string', enum: ['Alt', 'Control', 'Meta', 'Shift'] } },
+      },
+      required: ['key'],
+    },
+  },
+  {
+    name: 'scroll',
+    description: 'Scrolls with the mouse wheel at a point (the middle of the view if left out) and returns the new scroll position.',
+    inputSchema: {
+      type: 'object',
+      properties: { tabId, x: { type: 'number' }, y: { type: 'number' }, deltaX: { type: 'number' }, deltaY: { type: 'number' } },
+    },
+  },
+  {
+    name: 'navigate',
+    description: 'Opens a URL in the tab and waits for the page to load.',
+    inputSchema: { type: 'object', properties: { tabId, url: { type: 'string' } }, required: ['url'] },
+  },
+  {
+    name: 'network_requests',
+    description: "Lists a tab's network requests as the browser's debugger records them, oldest first: method, URL, type, status, time in ms, size, and for a request that never got a response why it failed (DNS, connection, CORS, blocked, canceled). Recording starts the first time any tool that drives or captures the tab (screenshot, run_script, click, ...) or this one touches it; reload: true clears the list and reloads the page to record its whole load.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId,
+        reload: { type: 'boolean', description: 'Clear the list and reload the page first.' },
+        failedOnly: { type: 'boolean', description: 'Only requests that failed or got a 4xx or 5xx status.' },
+        filter: { type: 'string', description: 'Only URLs containing this text.' },
+        limit: { type: 'integer', description: 'How many of the newest to return. Defaults to 100.' },
+      },
+    },
+  },
+  {
+    name: 'network_request',
+    description: 'Returns one request from network_requests in full: request and response headers (cookies, authorization and API keys are hidden), posted data, and with body: true the response body (text up to 20,000 characters, while the browser still keeps it).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId,
+        requestId: { type: 'string', description: 'The id from network_requests.' },
+        body: { type: 'boolean', description: 'Also return the response body.' },
+      },
+      required: ['requestId'],
     },
   },
 ];
@@ -73,6 +160,34 @@ function toExtension(message) {
   if (extension) return extension.send(JSON.stringify(message));
   outbox.push(message);
   outbox.splice(0, outbox.length - OUTBOX_SIZE);
+}
+
+const CONFIG_DIR = `${process.env.HOME}/.config/shy`;
+const slack = process.env.SLACK_CHANNEL && process.env.SLACK_AGENT
+  ? slackChat({
+    tokenFile: process.env.SLACK_TOKEN_FILE ?? `${CONFIG_DIR}/slack-user-token`,
+    threadsFile: process.env.SLACK_THREADS_FILE ?? `${CONFIG_DIR}/slack-threads.json`,
+    channel: process.env.SLACK_CHANNEL,
+    agent: process.env.SLACK_AGENT,
+    agentName: process.env.SLACK_AGENT_NAME,
+    send: toExtension,
+  })
+  : null;
+
+// Pieces of files the extension is sending, by upload id, until the chat message that uses them.
+const uploads = new Map();
+
+async function chat(message) {
+  const files = (message.files ?? []).map(({ upload, name, type }) => {
+    const data = Buffer.from((uploads.get(upload) ?? []).join(''), 'base64');
+    uploads.delete(upload);
+    return { name, type, data };
+  });
+  if (slack && (await slack.enabled())) return slack.chat({ ...message, files });
+  if (files.length) {
+    toExtension({ type: 'chat-error', conversation: message.conversation, text: 'Files can only be sent when the chat goes through Slack.' });
+  }
+  if (message.text) chatToGateway(message);
 }
 
 // A message the user typed in the panel, as an OpenAB gateway event.
@@ -169,6 +284,11 @@ async function handleRpc({ id, method, params }) {
       if (!TOOLS.some((tool) => tool.name === name)) throw Object.assign(new Error(`Unknown tool ${name}`), { code: -32602 });
       try {
         const content = await callExtension(name, args ?? {});
+        // A screenshot goes back as an image the agent can look at.
+        if (content?.image) {
+          const { image, ...rest } = content;
+          return { content: [{ type: 'image', data: image.data, mimeType: image.mimeType }, { type: 'text', text: JSON.stringify(rest) }] };
+        }
         return { content: [{ type: 'text', text: JSON.stringify(content, null, 2) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: error.message }], isError: true };
@@ -186,7 +306,7 @@ function send(res, status, body) {
 
 const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/health') {
-    return send(res, 200, { ok: true, extension: Boolean(extension), gateway: Boolean(gateway) });
+    return send(res, 200, { ok: true, extension: Boolean(extension), gateway: Boolean(gateway), slack: Boolean(slack?.status()) });
   }
   if (req.url !== '/mcp') return send(res, 404, { error: 'not found' });
   if (!isToken(req.headers.authorization?.replace(/^Bearer /, ''))) return send(res, 401, { error: 'unauthorized' });
@@ -283,13 +403,20 @@ sockets.on('connection', (ws) => {
       if (message.ok) call.resolve(message.content);
       else call.reject(new Error(message.error));
     } else if (message.type === 'chat') {
-      chatToGateway(message);
+      chat(message);
+    } else if (message.type === 'chat-open') {
+      slack?.open(message.conversation);
+    } else if (message.type === 'chat-file') {
+      if (!uploads.has(message.upload)) uploads.set(message.upload, []);
+      uploads.get(message.upload).push(message.data);
     }
   });
   ws.on('close', () => {
     clearTimeout(helloTimer);
     if (extension === ws) {
       extension = null;
+      uploads.clear();
+      slack?.close();
       console.log(`${new Date().toISOString()} Shy disconnected`);
     }
   });

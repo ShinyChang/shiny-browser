@@ -24,6 +24,7 @@
 
   <main id="chat-view" class="chat">
     <ol id="messages" class="messages"></ol>
+    <p id="working" class="working" hidden></p>
     <p id="chat-empty" class="empty">Ask Shy anything. It can read and use your tabs.</p>
   </main>
 
@@ -38,7 +39,7 @@
       <input id="relay-url" type="url" spellcheck="false">
       <label for="token">Token</label>
       <input id="token" type="password" autocomplete="off" spellcheck="false">
-      <label class="check"><input id="allow-all-sites" type="checkbox"> Use any site without asking</label>
+      <label class="check"><input id="allow-all-sites" type="checkbox"> Use and drive any site without asking</label>
       <label for="allowed-hosts">Allowed sites, one per line</label>
       <textarea id="allowed-hosts" rows="4" spellcheck="false"></textarea>
       <label for="always-tools">Tools that run without asking, as "site tool" per line</label>
@@ -49,8 +50,19 @@
   </section>
 
   <form id="composer" class="composer">
-    <textarea id="input" rows="1" placeholder="Talk to Shy" aria-label="Message"></textarea>
-    <button id="send" type="submit" class="primary">Send</button>
+    <div id="box" class="box">
+      <ul id="attachments" class="attachments" aria-label="Attachments"></ul>
+      <textarea id="input" rows="1" placeholder="Talk to Shy" aria-label="Message"></textarea>
+      <div class="tools">
+        <button id="attach" type="button" class="icon" aria-label="Add files" title="Add files">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" /></svg>
+        </button>
+        <input id="files" type="file" multiple hidden>
+        <button id="send" type="submit" class="icon send" aria-label="Send" title="Send">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 3.5 17.5 10 3 16.5l1.8-5.7L11 10l-6.2-.8Z" /></svg>
+        </button>
+      </div>
+    </div>
   </form>
 
   <script src="panel.js" type="module"></script>

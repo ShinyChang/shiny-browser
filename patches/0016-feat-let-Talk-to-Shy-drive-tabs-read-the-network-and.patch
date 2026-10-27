@@ -1,0 +1,1025 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shiny <owner@shinychang.net>
+Date: Tue, 27 Oct 2026 21:11:51 +0800
+Subject: [PATCH] feat: let Talk to Shy drive tabs, read the network and show
+ its progress
+
+- Agents get tools through chrome.debugger: screenshot, run_script,
+  click, type_text, press_key, scroll, navigate, and the network log
+  (network_requests, network_request) with credentials hidden. The
+  debugger infobar stays away for Talk to Shy, whose panel lists every
+  call.
+- "Use and drive any site without asking" is on by default. Turned off,
+  each site and each kind of action waits for the user to allow it.
+- The composer takes files from the + button, paste or drop.
+- While the agent works, a line under the chat says what it is doing,
+  and the tools a reply used fold up under it instead of sitting in
+  the text.
+- Shift+Cmd+S opens and closes the panel.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
+---
+ .../extensions/api/debugger/debugger_api.cc   |   6 +-
+ .../resources/talk_to_shy/background.js       | 355 +++++++++++++++++-
+ .../browser/resources/talk_to_shy/defaults.js |   2 +-
+ .../resources/talk_to_shy/manifest.json       |  15 +-
+ .../browser/resources/talk_to_shy/panel.css   | 100 ++++-
+ .../browser/resources/talk_to_shy/panel.html  |  18 +-
+ chrome/browser/resources/talk_to_shy/panel.js | 237 +++++++++++-
+ 7 files changed, 681 insertions(+), 52 deletions(-)
+
+diff --git a/chrome/browser/extensions/api/debugger/debugger_api.cc b/chrome/browser/extensions/api/debugger/debugger_api.cc
+index 4f4153a4bd..4e22215ed8 100644
+--- a/chrome/browser/extensions/api/debugger/debugger_api.cc
++++ b/chrome/browser/extensions/api/debugger/debugger_api.cc
+@@ -598,11 +598,13 @@ bool ExtensionDevToolsClientHost::Attach() {
+   }
+ 
+   // We allow policy-installed extensions to circumvent the normal
+-  // infobar warning. See crbug.com/41302695.
++  // infobar warning. See crbug.com/41302695. Talk to Shy is built in and lists
++  // every call in its side panel, so it needs no banner either.
+   const bool suppress_warning =
+       base::CommandLine::ForCurrentProcess()->HasSwitch(
+           ::switches::kSilentDebuggerExtensionAPI) ||
+-      Manifest::IsPolicyLocation(extension_->location());
++      Manifest::IsPolicyLocation(extension_->location()) ||
++      extension_->id() == extension_misc::kTalkToShyExtensionId;
+ 
+   if (!suppress_warning) {
+ #if BUILDFLAG(IS_ANDROID)
+diff --git a/chrome/browser/resources/talk_to_shy/background.js b/chrome/browser/resources/talk_to_shy/background.js
+index e750a678fc..eea04330be 100644
+--- a/chrome/browser/resources/talk_to_shy/background.js
++++ b/chrome/browser/resources/talk_to_shy/background.js
+@@ -9,6 +9,8 @@ const CHAT_SIZE = 200;
+ const APPROVAL_TIMEOUT_MS = 150000;
+ // A relay or tunnel restart drops the socket; retry within seconds rather than at the next alarm.
+ const RETRY_MS = [1000, 2000, 5000, 10000, 20000];
++// Base64 characters per piece; a multiple of 4, so each piece decodes on its own.
++const FILE_CHUNK = 512 * 1024;
+ 
+ let socket = null;
+ let keepalive = null;
+@@ -68,7 +70,7 @@ function requestApproval(request) {
+     chrome.notifications.create(`approval-${id}`, {
+       type: 'basic',
+       iconUrl: 'icon.png',
+-      title: request.kind === 'site' ? `Let your agent use ${request.host}?` : `Allow ${request.tool}?`,
++      title: request.question ?? (request.kind === 'site' ? `Let your agent use ${request.host}?` : `Allow ${request.tool}?`),
+       message: request.kind === 'site'
+         ? `It wants to run ${request.tool} there. Click to answer in Talk to Shy.`
+         : `Your agent wants to run it on ${request.host}. Click to review it in Talk to Shy.`,
+@@ -115,6 +117,7 @@ async function connect() {
+     if (message.type === 'welcome') {
+       retries = 0;
+       setStatus('connected');
++      openChat();
+     } else if (message.type === 'rejected') setStatus(`rejected: ${message.reason}`);
+     else if (message.type === 'call') handleCall(ws, message);
+     else if (message.type.startsWith('chat-')) chatFromRelay(message);
+@@ -142,44 +145,114 @@ async function saveChat() {
+   await chrome.storage.local.set({ conversation: chat.conversation, messages: chat.messages });
+ }
+ 
+-async function sendChat(text) {
++// A relay that keeps the chat in a Slack thread follows the thread of the conversation shown here.
++async function openChat() {
++  await chatLoaded;
++  if (socket?.readyState === WebSocket.OPEN) {
++    socket.send(JSON.stringify({ type: 'chat-open', conversation: chat.conversation }));
++  }
++}
++
++async function sendChat(text, files = []) {
+   await chatLoaded;
+   const id = crypto.randomUUID();
+-  chat.messages.push({ id, role: 'user', text, at: Date.now() });
++  chat.messages.push({
++    id, role: 'user', text, at: Date.now(), pending: true, files: files.map(({ name, type, thumb }) => ({ name, type, url: thumb })),
++  });
+   if (socket?.readyState === WebSocket.OPEN && status === 'connected') {
+-    socket.send(JSON.stringify({ type: 'chat', conversation: chat.conversation, id, text }));
++    const refs = files.map(({ name, type, size, data }) => {
++      const upload = crypto.randomUUID();
++      // Files go in pieces, so no single WebSocket message gets large on its way through the tunnel.
++      for (let i = 0; i < data.length; i += FILE_CHUNK) {
++        socket.send(JSON.stringify({ type: 'chat-file', upload, data: data.slice(i, i + FILE_CHUNK) }));
++      }
++      return { upload, name, type, size };
++    });
++    socket.send(JSON.stringify({ type: 'chat', conversation: chat.conversation, id, text, files: refs }));
+   } else {
+     chat.messages.push({ id: crypto.randomUUID(), role: 'error', text: 'Shy is not connected to its relay.', at: Date.now() });
+   }
+   await saveChat();
+ }
+ 
+-async function chatFromRelay({ type, conversation, messageId, text, emoji, remove }) {
++async function chatFromRelay({ type, conversation, id, messageId, text, emoji, remove, messages }) {
+   await chatLoaded;
+   // A reply to a conversation the user has since cleared has nowhere to go.
+   if (conversation !== chat.conversation) return;
+-  const message = chat.messages.find((m) => m.id === messageId);
+-  if (type === 'chat-reply') {
++  const message = chat.messages.find((m) => m.id === (type === 'chat-sent' ? id : messageId));
++  if (type === 'chat-sent' && message) {
++    // The thread names the message by its Slack timestamp from now on; without one, the next
++    // look at the thread brings the message back.
++    if (messageId) message.id = messageId;
++    delete message.pending;
++  } else if (type === 'chat-thread') {
++    // The thread is the record; only what it cannot know yet stays. A message still unconfirmed
++    // after a minute never reached it, and an error already says so.
++    const unsent = (m) => m.pending && Date.now() - m.at < 60000;
++    chat.messages = [...messages, ...chat.messages.filter((m) => unsent(m) || m.role === 'error')];
++  } else if (type === 'chat-reply') {
+     if (message) message.text = text;
+     else chat.messages.push({ id: messageId, role: 'agent', text, at: Date.now() });
+   } else if (type === 'chat-delete') {
+     chat.messages = chat.messages.filter((m) => m.id !== messageId);
+   } else if (type === 'chat-reaction' && message) {
+-    message.reaction = remove ? null : emoji;
++    // An agent swaps status reactions by adding the new one before removing the old one.
++    if (!remove) message.reaction = emoji;
++    else if (message.reaction === emoji) message.reaction = null;
+   } else if (type === 'chat-error') {
+     chat.messages.push({ id: crypto.randomUUID(), role: 'error', text, at: Date.now() });
+   }
+   await saveChat();
+ }
+ 
++async function note(text) {
++  await chatLoaded;
++  chat.messages.push({ id: crypto.randomUUID(), role: 'error', text, at: Date.now() });
++  await saveChat();
++}
++
+ async function newChat() {
+   await chatLoaded;
+   chat = { conversation: crypto.randomUUID(), messages: [] };
+   await saveChat();
++  openChat();
++}
++
++// A few words for the panel on what the agent is doing.
++async function describe(tool, args) {
++  let host = '';
++  try {
++    const tab = args.tabId === undefined
++      ? (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]
++      : await chrome.tabs.get(args.tabId);
++    host = new URL(tab.url).host;
++  } catch {}
++  const on = host ? ` on ${host}` : '';
++  const page = host || 'the page';
++  switch (tool) {
++    case 'list_tabs': return 'Looking at your tabs';
++    case 'read_page': return `Reading ${page}`;
++    case 'screenshot': return `Taking a screenshot of ${page}`;
++    case 'click': return `Clicking ${args.selector ?? `at ${args.x}, ${args.y}`}${on}`;
++    case 'type_text': return `Typing${on}`;
++    case 'press_key': return `Pressing ${args.key}${on}`;
++    case 'scroll': return `Scrolling ${page}`;
++    case 'navigate': return `Opening ${URL.parse(args.url)?.host ?? args.url}`;
++    case 'run_script': return `Running a script${on}`;
++    case 'network_requests': return `${args.reload ? 'Reloading and reading' : 'Reading'} the network log${on}`;
++    case 'network_request': return `Reading a request${on}`;
++    case 'list_webmcp_tools': return `Looking at the page's tools${on}`;
++    case 'call_webmcp_tool': return `Using ${args.name}${on}`;
++    default: return tool;
++  }
+ }
+ 
+ async function handleCall(ws, { id, tool, args }) {
+-  const entry = { at: Date.now(), tool, ok: false };
++  // ok stays null while the call runs, so the panel can show it as it happens.
++  const entry = { at: Date.now(), tool, ok: null, detail: await describe(tool, args ?? {}) };
++  log.unshift(entry);
++  log.length = Math.min(log.length, LOG_SIZE);
++  notifyPanel();
+   try {
+     if (!Object.hasOwn(TOOLS, tool)) throw new Error(`Talk to Shy has no tool named ${tool}`);
+     const content = await TOOLS[tool](args ?? {});
+@@ -187,11 +260,11 @@ async function handleCall(ws, { id, tool, args }) {
+     entry.host = content?.host;
+     ws.send(JSON.stringify({ type: 'result', id, ok: true, content }));
+   } catch (error) {
++    entry.ok = false;
+     entry.error = error.message;
+     ws.send(JSON.stringify({ type: 'result', id, ok: false, error: error.message }));
+   }
+-  log.unshift(entry);
+-  log.length = Math.min(log.length, LOG_SIZE);
++  entry.endedAt = Date.now();
+   notifyPanel();
+ }
+ 
+@@ -246,6 +319,163 @@ async function runPageTool(name, input) {
+   return { output };
+ }
+ 
++// Screenshots, scripts and input go through the DevTools protocol, so scripts run despite a
++// page's CSP and clicks and keys arrive as real input.
++const attached = new Set();
++// Requests are recorded from the first attach, so a failure the page hit before the agent asked
++// about it is still there to read.
++const NETWORK_LIMIT = 500;
++const networks = new Map();
++
++// Resolves true when this call started the recording.
++async function attach(tabId) {
++  if (attached.has(tabId)) return false;
++  try {
++    await chrome.debugger.attach({ tabId }, '1.3');
++  } catch (error) {
++    if (!/already attached/i.test(error.message)) throw error;
++  }
++  attached.add(tabId);
++  networks.set(tabId, { since: Date.now(), requests: new Map() });
++  await chrome.debugger.sendCommand({ tabId }, 'Network.enable', { maxTotalBufferSize: 20000000, maxResourceBufferSize: 5000000 });
++  return true;
++}
++
++async function cdp(tabId, method, params = {}) {
++  await attach(tabId);
++  return chrome.debugger.sendCommand({ tabId }, method, params);
++}
++chrome.debugger.onDetach.addListener(({ tabId }) => {
++  attached.delete(tabId);
++  networks.delete(tabId);
++});
++
++chrome.debugger.onEvent.addListener(({ tabId }, method, params) => {
++  const log = networks.get(tabId);
++  if (!log) return;
++  const entry = log.requests.get(params.requestId);
++  if (method === 'Network.requestWillBeSent') {
++    if (entry && params.redirectResponse) {
++      entry.redirects.push(`${params.redirectResponse.status} ${entry.url}`);
++      Object.assign(entry, { url: params.request.url, requestHeaders: params.request.headers });
++      return;
++    }
++    const { url, method: verb, headers, postData } = params.request;
++    log.requests.set(params.requestId, {
++      id: params.requestId, method: verb, url, type: params.type, start: params.timestamp, requestHeaders: headers, postData, redirects: [],
++    });
++    if (log.requests.size > NETWORK_LIMIT) log.requests.delete(log.requests.keys().next().value);
++  } else if (!entry) {
++    return;
++  } else if (method === 'Network.responseReceived') {
++    const { status, statusText, mimeType, headers, fromDiskCache, fromServiceWorker, fromPrefetchCache } = params.response;
++    Object.assign(entry, { status, statusText, mimeType, responseHeaders: headers, type: params.type, fromCache: fromDiskCache || fromServiceWorker || fromPrefetchCache });
++  } else if (method === 'Network.loadingFinished') {
++    Object.assign(entry, { end: params.timestamp, bytes: params.encodedDataLength });
++  } else if (method === 'Network.loadingFailed') {
++    Object.assign(entry, { end: params.timestamp, failed: params.canceled ? 'canceled' : params.errorText, blocked: params.blockedReason ?? params.corsErrorStatus?.corsError });
++  }
++});
++
++const clip = (text, size) => (text.length > size ? `${text.slice(0, size)}…` : text);
++
++function requestSummary(r) {
++  return {
++    id: r.id, method: r.method, url: clip(r.url, 300), type: r.type, status: r.status ?? null,
++    ...(r.failed && { failed: r.failed }), ...(r.blocked && { blocked: r.blocked }),
++    ms: r.end ? Math.round((r.end - r.start) * 1000) : null, bytes: r.bytes ?? null,
++    ...(r.fromCache && { fromCache: true }), ...(r.redirects.length && { redirects: r.redirects }),
++  };
++}
++
++// Credentials stay out of what the agent reads, since it may repeat it in a chat.
++const SECRET_HEADERS = /^(cookie|set-cookie|authorization|proxy-authorization|x-api-key|x-auth-token|x-csrf-token|x-xsrf-token)$/i;
++const redact = (headers = {}) => Object.fromEntries(Object.entries(headers).map(([k, v]) => [k, SECRET_HEADERS.test(k) ? '[redacted]' : v]));
++
++// One answer covers each kind of action on a site, so a run of clicks asks once.
++async function approveAction(tab, host, key, question, detail) {
++  const { allowAllSites, alwaysAllowedTools } = await settings();
++  if (allowAllSites || alwaysAllowedTools.includes(`${host} ${key}`)) return;
++  const choice = await requestApproval({
++    kind: 'action', tool: key, question, host, title: tab.title, windowId: tab.windowId, input: detail,
++  });
++  if (choice === 'deny') throw new Error(`The user did not allow that on ${host}`);
++  if (choice === 'always') await addSetting('alwaysAllowedTools', `${host} ${key}`);
++}
++
++async function evaluate(tabId, expression) {
++  const { result, exceptionDetails } = await cdp(tabId, 'Runtime.evaluate', {
++    expression, awaitPromise: true, returnByValue: true, userGesture: true, replMode: true,
++  });
++  if (exceptionDetails) throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text);
++  return result.value;
++}
++
++async function screenshot(tabId) {
++  const { cssVisualViewport: view } = await cdp(tabId, 'Page.getLayoutMetrics');
++  // The capture comes at the display's pixel ratio; undoing it puts the image in CSS pixels, so a
++  // point in it is a point click takes.
++  const ratio = await evaluate(tabId, 'devicePixelRatio');
++  const { data } = await cdp(tabId, 'Page.captureScreenshot', {
++    format: 'jpeg',
++    quality: 80,
++    clip: { x: view.pageX, y: view.pageY, width: view.clientWidth, height: view.clientHeight, scale: 1 / ratio },
++  });
++  return { image: { data, mimeType: 'image/jpeg' }, width: Math.round(view.clientWidth), height: Math.round(view.clientHeight) };
++}
++
++async function clickAt(tabId, x, y) {
++  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
++    await cdp(tabId, 'Input.dispatchMouseEvent', {
++      type, x, y, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1,
++    });
++  }
++}
++
++async function center(tabId, selector) {
++  const point = await evaluate(tabId, `(() => {
++    const element = document.querySelector(${JSON.stringify(selector)});
++    if (!element) return null;
++    element.scrollIntoView({ block: 'center', inline: 'center' });
++    const box = element.getBoundingClientRect();
++    return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
++  })()`);
++  if (!point) throw new Error(`Nothing on the page matches ${selector}`);
++  return point;
++}
++
++const KEY_CODES = {
++  Enter: 13, Tab: 9, Escape: 27, Backspace: 8, Delete: 46, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39,
++  ArrowDown: 40, Home: 36, End: 35, PageUp: 33, PageDown: 34, ' ': 32,
++};
++const MODIFIERS = { Alt: 1, Control: 2, Meta: 4, Shift: 8 };
++
++async function pressKey(tabId, key, modifiers = []) {
++  const bits = modifiers.reduce((sum, name) => sum | (MODIFIERS[name] ?? 0), 0);
++  const single = [...key].length === 1;
++  // With Control or Meta held, a letter is a shortcut rather than text.
++  const text = key === 'Enter' ? '\r' : single && !(bits & (MODIFIERS.Control | MODIFIERS.Meta)) ? key : undefined;
++  const event = { key, windowsVirtualKeyCode: KEY_CODES[key] ?? (single ? key.toUpperCase().charCodeAt(0) : 0), modifiers: bits };
++  await cdp(tabId, 'Input.dispatchKeyEvent', { ...event, type: text ? 'keyDown' : 'rawKeyDown', ...(text && { text }) });
++  await cdp(tabId, 'Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
++}
++
++async function loadNewDocument(tabId, method, params) {
++  const before = await evaluate(tabId, 'performance.timeOrigin').catch(() => 0);
++  await cdp(tabId, method, params);
++  // A new document has a new time origin; until then readyState still describes the old one.
++  for (let i = 0; i < 60; i++) {
++    await new Promise((resolve) => setTimeout(resolve, 250));
++    const now = await evaluate(tabId, '[performance.timeOrigin, document.readyState]').catch(() => null);
++    if (now && now[0] !== before && now[1] === 'complete') break;
++  }
++}
++
++async function navigate(tabId, url) {
++  await loadNewDocument(tabId, 'Page.navigate', { url });
++  return evaluate(tabId, '({ url: location.href, title: document.title })');
++}
++
+ const TOOLS = {
+   async list_tabs() {
+     const tabs = await chrome.tabs.query({ lastFocusedWindow: true });
+@@ -265,7 +495,8 @@ const TOOLS = {
+     const tool = tools.find((t) => t.name === name);
+     if (!tool) throw new Error(`${host} has no WebMCP tool named ${name}`);
+     const key = `${host} ${name}`;
+-    if (!tool.annotations?.readOnlyHint && !(await settings()).alwaysAllowedTools.includes(key)) {
++    const { allowAllSites, alwaysAllowedTools } = await settings();
++    if (!tool.annotations?.readOnlyHint && !allowAllSites && !alwaysAllowedTools.includes(key)) {
+       const choice = await requestApproval({
+         kind: 'tool', tool: name, host, title: tab.title, windowId: tab.windowId, input: JSON.stringify(input ?? {}, null, 2),
+       });
+@@ -274,6 +505,103 @@ const TOOLS = {
+     }
+     return { host, ...(await inPage(tab.id, runPageTool, [name, input ?? {}])) };
+   },
++  async screenshot({ tabId }) {
++    const { tab, host } = await targetTab(tabId, 'screenshot');
++    return { host, ...(await screenshot(tab.id)) };
++  },
++  async run_script({ tabId, code }) {
++    const { tab, host } = await targetTab(tabId, 'run_script');
++    await approveAction(tab, host, 'run_script', `Let your agent run a script on ${host}?`, code);
++    let result;
++    try {
++      result = await evaluate(tab.id, code);
++    } catch (error) {
++      // Agents often send a function body, and a REPL evaluation rejects its top-level return.
++      if (!/Illegal return statement/.test(error.message)) throw error;
++      result = await evaluate(tab.id, `await (async () => {\n${code}\n})()`);
++    }
++    return { host, result: result ?? null };
++  },
++  async click({ tabId, x, y, selector }) {
++    const { tab, host } = await targetTab(tabId, 'click');
++    await approveAction(tab, host, 'control', `Let your agent use ${host}?`, selector ? `Click ${selector}` : `Click at ${x}, ${y}`);
++    const point = selector ? await center(tab.id, selector) : { x, y };
++    await clickAt(tab.id, point.x, point.y);
++    return { host, clicked: point };
++  },
++  async type_text({ tabId, text, selector }) {
++    const { tab, host } = await targetTab(tabId, 'type_text');
++    await approveAction(tab, host, 'control', `Let your agent use ${host}?`, `Type "${text}"${selector ? ` into ${selector}` : ''}`);
++    if (selector) {
++      const point = await center(tab.id, selector);
++      await clickAt(tab.id, point.x, point.y);
++    }
++    await cdp(tab.id, 'Input.insertText', { text });
++    return { host, typed: text.length };
++  },
++  async press_key({ tabId, key, modifiers }) {
++    const { tab, host } = await targetTab(tabId, 'press_key');
++    await approveAction(tab, host, 'control', `Let your agent use ${host}?`, `Press ${[...(modifiers ?? []), key].join('+')}`);
++    await pressKey(tab.id, key, modifiers);
++    return { host, pressed: key };
++  },
++  async scroll({ tabId, x, y, deltaX = 0, deltaY = 0 }) {
++    const { tab, host } = await targetTab(tabId, 'scroll');
++    await approveAction(tab, host, 'control', `Let your agent use ${host}?`, `Scroll by ${deltaX}, ${deltaY}`);
++    const middle = await evaluate(tab.id, '({ x: innerWidth / 2, y: innerHeight / 2 })');
++    await cdp(tab.id, 'Input.dispatchMouseEvent', { type: 'mouseWheel', x: x ?? middle.x, y: y ?? middle.y, deltaX, deltaY });
++    await new Promise((resolve) => setTimeout(resolve, 300));
++    return { host, scroll: await evaluate(tab.id, '({ x: scrollX, y: scrollY })') };
++  },
++  async navigate({ tabId, url }) {
++    const { tab, host } = await targetTab(tabId, 'navigate');
++    await approveAction(tab, host, 'control', `Let your agent use ${host}?`, `Open ${url}`);
++    return { host, ...(await navigate(tab.id, url)) };
++  },
++  async network_requests({ tabId, reload, failedOnly, filter, limit = 100 }) {
++    const { tab, host } = await targetTab(tabId, 'network_requests');
++    let started = await attach(tab.id);
++    if (reload) {
++      await approveAction(tab, host, 'control', `Let your agent use ${host}?`, 'Reload the page');
++      networks.set(tab.id, { since: Date.now(), requests: new Map() });
++      await loadNewDocument(tab.id, 'Page.reload', { ignoreCache: true });
++      // Requests the page starts once loaded would otherwise be missing.
++      await new Promise((resolve) => setTimeout(resolve, 500));
++      started = false;
++    }
++    const log = networks.get(tab.id);
++    let list = [...log.requests.values()];
++    if (failedOnly) list = list.filter((r) => r.failed || r.blocked || r.status >= 400);
++    if (filter) list = list.filter((r) => r.url.includes(filter));
++    return {
++      host,
++      recordingSince: new Date(log.since).toISOString(),
++      ...(started && { note: 'Recording started just now, so earlier requests were not seen. Pass reload: true to record the page loading.' }),
++      total: log.requests.size,
++      requests: list.slice(-limit).map(requestSummary),
++    };
++  },
++  async network_request({ tabId, requestId, body }) {
++    const { tab, host } = await targetTab(tabId, 'network_request');
++    const r = networks.get(tab.id)?.requests.get(requestId);
++    if (!r) throw new Error(`This tab has no recorded request ${requestId}; list them with network_requests`);
++    const detail = {
++      host, ...requestSummary(r), statusText: r.statusText, mimeType: r.mimeType,
++      requestHeaders: redact(r.requestHeaders), ...(r.postData && { postData: clip(r.postData, 4000) }),
++      responseHeaders: redact(r.responseHeaders),
++    };
++    if (body) {
++      try {
++        const { body: data, base64Encoded } = await cdp(tab.id, 'Network.getResponseBody', { requestId });
++        detail.body = base64Encoded ? `(binary, about ${Math.round((data.length * 3) / 4)} bytes)` : clip(data, 20000);
++      } catch (error) {
++        // The browser drops bodies after a while or a navigation.
++        detail.body = null;
++        detail.bodyError = error.message;
++      }
++    }
++    return detail;
++  },
+ };
+ 
+ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+@@ -291,7 +619,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+     return true;
+   }
+   if (message.type === 'decide') decide(message.id, message.choice);
+-  else if (message.type === 'chat-send') sendChat(message.text);
++  else if (message.type === 'chat-send') sendChat(message.text, message.files);
++  else if (message.type === 'chat-note') note(message.text);
+   else if (message.type === 'chat-new') newChat();
+ });
+ // A service worker stopped while the relay was down has nothing left to wake it.
+diff --git a/chrome/browser/resources/talk_to_shy/defaults.js b/chrome/browser/resources/talk_to_shy/defaults.js
+index 042900a04d..b7471888c3 100644
+--- a/chrome/browser/resources/talk_to_shy/defaults.js
++++ b/chrome/browser/resources/talk_to_shy/defaults.js
+@@ -1,7 +1,7 @@
+ export const DEFAULTS = {
+   relayUrl: 'wss://shy.shinychang.net/extension',
+   token: '',
+-  // When off, a site outside allowedHosts waits for the user to allow it.
++  // When off, a site outside allowedHosts, and each kind of action on a site, wait for the user to allow them.
+   allowAllSites: true,
+   allowedHosts: ['creator.lottiefiles.com'],
+   // "host tool" pairs the user chose to always allow without asking.
+diff --git a/chrome/browser/resources/talk_to_shy/manifest.json b/chrome/browser/resources/talk_to_shy/manifest.json
+index 7698399f24..23837f7ee0 100644
+--- a/chrome/browser/resources/talk_to_shy/manifest.json
++++ b/chrome/browser/resources/talk_to_shy/manifest.json
+@@ -1,7 +1,7 @@
+ {
+   "manifest_version": 3,
+   "name": "Talk to Shy",
+-  "version": "0.2.1",
++  "version": "0.5.0",
+   "description": "Lets an agent you trust read and use the sites you allow, with every call shown in a side panel.",
+   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4QZO4SO7Uu5A0Of3r7b1PCaFlLFNyu/Dq3dvnTcvKLi204zeuGBP29g6wqB+W8rbIcBrSo958u2y3fQqycvkbzMfeWc4uCLJ19GIBVrvR6YB9MeagvGMM07l1mZREMRZfm5OF/e0xBpUhOnBAfArqe8uZ+vUcKdjojkeRJJOWY3iv3FLujK9p1CZ76UOL2tRNoqIa654f/f+ntcr59d+6szlXGJjIFnScRP9mthLSX7UevHh0bItJ0bNG/fjIvzvp5vObR7lIRizJUda8fYqXdePKLiNakgtF5n5yZ7T3k/Zt4cmV0rkxDacPWCC2dJcxvVVLpraG7JnABI1d0ZdMQIDAQAB",
+   "icons": {
+@@ -9,11 +9,13 @@
+   },
+   "permissions": [
+     "alarms",
++    "debugger",
+     "notifications",
+     "scripting",
+     "sidePanel",
+     "storage",
+-    "tabs"
++    "tabs",
++    "unlimitedStorage"
+   ],
+   "host_permissions": [
+     "<all_urls>"
+@@ -28,5 +30,14 @@
+   "action": {
+     "default_title": "Talk to Shy",
+     "default_icon": "icon.png"
++  },
++  "commands": {
++    "_execute_action": {
++      "suggested_key": {
++        "default": "Ctrl+Shift+S",
++        "mac": "Command+Shift+S"
++      },
++      "description": "Open Talk to Shy"
++    }
+   }
+ }
+diff --git a/chrome/browser/resources/talk_to_shy/panel.css b/chrome/browser/resources/talk_to_shy/panel.css
+index a9021f6298..d2f43b33d6 100644
+--- a/chrome/browser/resources/talk_to_shy/panel.css
++++ b/chrome/browser/resources/talk_to_shy/panel.css
+@@ -112,7 +112,31 @@ pre {
+   padding: 6px 10px;
+ }
+ .message.error { color: var(--bad); font-size: 12px; }
+-.message.waiting { color: var(--muted); font-size: 12px; }
++.working {
++  margin: 10px 0 0;
++  color: var(--muted);
++  font-size: 12px;
++  white-space: nowrap;
++  overflow: hidden;
++  text-overflow: ellipsis;
++}
++.working::before {
++  content: '';
++  display: inline-block;
++  vertical-align: middle;
++  margin: -2px 6px 0 0;
++  width: 6px;
++  height: 6px;
++  border-radius: 50%;
++  background: var(--wait);
++  animation: pulse 1.2s ease-in-out infinite;
++}
++@keyframes pulse { 50% { opacity: 0.3; transform: scale(0.7); } }
++@media (prefers-reduced-motion: reduce) { .working::before { animation: none; } }
++.tool-calls { font-size: 12px; color: var(--muted); }
++.tool-calls summary { cursor: pointer; width: max-content; }
++.tool-calls ul { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 2px; }
++.tool-calls li { font-family: ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
+ .reaction { justify-self: end; font-size: 12px; }
+ .empty { margin: 0; color: var(--muted); }
+ 
+@@ -130,17 +154,71 @@ textarea:disabled { opacity: 0.5; }
+ .settings button { justify-self: start; margin-top: 6px; }
+ .saved { color: var(--ok); font-size: 12px; }
+ 
+-.composer {
+-  display: flex;
+-  align-items: flex-end;
+-  gap: 8px;
+-  padding: 10px 12px 12px;
+-  border-top: 1px solid var(--line);
++.message .files { display: flex; flex-wrap: wrap; gap: 6px; }
++.message .files img { display: block; max-width: 220px; max-height: 220px; border-radius: 6px; }
++
++.composer { padding: 8px 10px 10px; }
++.box {
++  display: grid;
++  border: 1px solid var(--line);
++  border-radius: 8px;
++  background: var(--field);
+ }
+-.composer textarea {
+-  flex: 1;
++.box:focus-within { border-color: var(--muted); }
++.box.dropping { border-color: var(--wait); border-style: dashed; }
++.box textarea {
++  border: 0;
++  background: transparent;
+   resize: none;
+   font: 13px/1.45 system-ui, sans-serif;
+-  padding: 8px 10px;
+-  max-height: 160px;
++  padding: 10px 12px 2px;
++  max-height: 200px;
++}
++.box textarea:focus-visible { outline: none; }
++.tools { display: flex; justify-content: space-between; align-items: center; padding: 2px 6px 6px; }
++button.icon {
++  display: grid;
++  place-items: center;
++  width: 28px;
++  height: 28px;
++  padding: 0;
++  border: 0;
++  border-radius: 6px;
++  background: transparent;
++  color: var(--muted);
++}
++button.icon:hover:not(:disabled) { background: var(--line); color: var(--fg); }
++button.icon svg { width: 18px; height: 18px; }
++#attach svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
++button.send { color: var(--ok); }
++button.send svg { fill: currentColor; }
++.attachments { list-style: none; margin: 0; padding: 8px 8px 0; display: flex; flex-wrap: wrap; gap: 6px; }
++.attachments:empty { display: none; }
++.attachment {
++  position: relative;
++  display: flex;
++  align-items: center;
++  height: 48px;
++  max-width: 180px;
++  border: 1px solid var(--line);
++  border-radius: 6px;
++  font-size: 12px;
++  overflow: hidden;
++}
++.attachment img { width: 48px; height: 48px; object-fit: cover; }
++.attachment .name { padding: 0 24px 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
++.attachment img + .name { display: none; }
++.attachment button {
++  position: absolute;
++  top: 2px;
++  right: 2px;
++  width: 18px;
++  height: 18px;
++  padding: 0;
++  border: 0;
++  border-radius: 50%;
++  background: var(--fg);
++  color: var(--bg);
++  font-size: 12px;
++  line-height: 18px;
+ }
+diff --git a/chrome/browser/resources/talk_to_shy/panel.html b/chrome/browser/resources/talk_to_shy/panel.html
+index 44a10649be..e3b3b52b95 100644
+--- a/chrome/browser/resources/talk_to_shy/panel.html
++++ b/chrome/browser/resources/talk_to_shy/panel.html
+@@ -24,6 +24,7 @@
+ 
+   <main id="chat-view" class="chat">
+     <ol id="messages" class="messages"></ol>
++    <p id="working" class="working" hidden></p>
+     <p id="chat-empty" class="empty">Ask Shy anything. It can read and use your tabs.</p>
+   </main>
+ 
+@@ -38,7 +39,7 @@
+       <input id="relay-url" type="url" spellcheck="false">
+       <label for="token">Token</label>
+       <input id="token" type="password" autocomplete="off" spellcheck="false">
+-      <label class="check"><input id="allow-all-sites" type="checkbox"> Use any site without asking</label>
++      <label class="check"><input id="allow-all-sites" type="checkbox"> Use and drive any site without asking</label>
+       <label for="allowed-hosts">Allowed sites, one per line</label>
+       <textarea id="allowed-hosts" rows="4" spellcheck="false"></textarea>
+       <label for="always-tools">Tools that run without asking, as "site tool" per line</label>
+@@ -49,8 +50,19 @@
+   </section>
+ 
+   <form id="composer" class="composer">
+-    <textarea id="input" rows="1" placeholder="Talk to Shy" aria-label="Message"></textarea>
+-    <button id="send" type="submit" class="primary">Send</button>
++    <div id="box" class="box">
++      <ul id="attachments" class="attachments" aria-label="Attachments"></ul>
++      <textarea id="input" rows="1" placeholder="Talk to Shy" aria-label="Message"></textarea>
++      <div class="tools">
++        <button id="attach" type="button" class="icon" aria-label="Add files" title="Add files">
++          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" /></svg>
++        </button>
++        <input id="files" type="file" multiple hidden>
++        <button id="send" type="submit" class="icon send" aria-label="Send" title="Send">
++          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 3.5 17.5 10 3 16.5l1.8-5.7L11 10l-6.2-.8Z" /></svg>
++        </button>
++      </div>
++    </div>
+   </form>
+ 
+   <script src="panel.js" type="module"></script>
+diff --git a/chrome/browser/resources/talk_to_shy/panel.js b/chrome/browser/resources/talk_to_shy/panel.js
+index f9c8cfc9bc..622d136b51 100644
+--- a/chrome/browser/resources/talk_to_shy/panel.js
++++ b/chrome/browser/resources/talk_to_shy/panel.js
+@@ -49,12 +49,12 @@ function markdown(text) {
+   return fragment;
+ }
+ 
+-function approvalCard({ id, kind, tool, host, title, input: toolInput }) {
++function approvalCard({ id, kind, tool, host, title, question, input: toolInput }) {
+   const card = document.createElement('article');
+   card.className = 'card approval';
+   const what = document.createElement('p');
+   what.className = 'what';
+-  what.textContent = kind === 'site' ? `Let your agent use ${host}?` : `Run ${tool} on ${host}?`;
++  what.textContent = question ?? (kind === 'site' ? `Let your agent use ${host}?` : `Run ${tool} on ${host}?`);
+   const where = document.createElement('p');
+   where.className = 'meta';
+   where.textContent = kind === 'site' ? `It wants to run ${tool} on "${title}".` : title;
+@@ -81,11 +81,99 @@ function approvalCard({ id, kind, tool, host, title, input: toolInput }) {
+   return card;
+ }
+ 
+-function messageItem({ role, text, reaction }) {
++function filesView(files) {
++  const view = document.createElement('div');
++  view.className = 'files';
++  for (const { name, url, link } of files) {
++    let el;
++    if (url) {
++      el = document.createElement('img');
++      el.src = url;
++      el.alt = name;
++    } else {
++      el = document.createElement('span');
++      el.textContent = `📎 ${name}`;
++    }
++    if (link) {
++      const a = document.createElement('a');
++      a.href = link;
++      a.target = '_blank';
++      a.rel = 'noreferrer';
++      a.append(el);
++      el = a;
++    }
++    view.append(el);
++  }
++  return view;
++}
++
++// OpenAB shows how a turn is going as one reaction on the user's message, swapped as it goes.
++const WORKING = {
++  '👀': 'Starting…', '🤔': 'Thinking…', '🔥': 'Using a tool…', '👨‍💻': 'Running code…', '🧑‍💻': 'Running code…',
++  '⚡': 'Searching the web…', '🥱': 'Still working…', '😨': 'Taking a long time…',
++};
++// OpenAB starts a reply with its tool calls, "🔧 `title`..." while one runs, and counts once there are many.
++const TOOL_LINE = /^(?:(?:🔧|✅|❌) `(.*)`(\.\.\.)?|(?:🔧|✅|❌) \d+(?: · (?:🔧|✅|❌) \d+)* tool\(s\)(?: completed)?|🔧 \d+ more(?: running)?)$/u;
++// A call that ends quickly would otherwise never be seen.
++const RECENT_CALL_MS = 3000;
++const openTools = new Set();
++
++function splitTools(text) {
++  const lines = text.split('\n');
++  let count = 0;
++  while (count < lines.length && TOOL_LINE.test(lines[count])) count++;
++  return { tools: lines.slice(0, count), body: lines.slice(count).join('\n').trim() };
++}
++
++const toolTitle = (title) => title.replace(/^~\/\.local\/bin\//, '');
++
++function toolsView(id, lines) {
++  const details = document.createElement('details');
++  details.className = 'tool-calls';
++  // The list is redrawn on every update, which would close it under the user's eyes.
++  details.open = openTools.has(id);
++  details.addEventListener('toggle', () => (details.open ? openTools.add(id) : openTools.delete(id)));
++  const count = lines.reduce((n, line) => n + (line.includes('`') ? 1 : line.match(/\d+/g).reduce((a, d) => a + Number(d), 0)), 0);
++  const summary = document.createElement('summary');
++  summary.textContent = `${count} ${count === 1 ? 'tool' : 'tools'}`;
++  const list = document.createElement('ul');
++  list.append(...lines.map((line) => {
++    const item = document.createElement('li');
++    item.textContent = line.replace(/`/g, '').replace(' ~/.local/bin/', ' ');
++    return item;
++  }));
++  details.append(summary, list);
++  return details;
++}
++
++// What the agent is doing now, or null once its turn is over.
++function workingOn(messages, call) {
++  if (call && (call.ok === null || Date.now() - call.endedAt < RECENT_CALL_MS)) return call.detail ?? call.tool;
++  const userAt = messages.findLastIndex((m) => m.role === 'user');
++  if (userAt < 0) return null;
++  const { reaction } = messages[userAt];
++  const last = messages.at(-1);
++  const running = last.role === 'agent'
++    ? splitTools(last.text).tools.map((line) => line.match(TOOL_LINE)).findLast((m) => m[2])
++    : null;
++  // Without status reactions, the turn lasts until a reply arrives and no tool is still running.
++  const working = reaction ? Object.hasOwn(WORKING, reaction) : last === messages[userAt] || Boolean(running);
++  if (!working) return null;
++  if (running) return `Running ${toolTitle(running[1])}`;
++  return WORKING[reaction] ?? 'Thinking…';
++}
++
++function messageItem({ id, role, text, reaction, files }, inProgress) {
+   const item = document.createElement('li');
+   item.className = `message ${role}`;
+-  if (role === 'agent') item.append(markdown(text));
+-  else item.append(inline(text));
++  if (role === 'agent') {
++    const { tools, body } = splitTools(text);
++    // Until there are words, the status line says what is happening.
++    if (!body && inProgress) return null;
++    item.append(markdown(body));
++    if (tools.length) item.append(toolsView(id, tools));
++  } else if (text) item.append(inline(text));
++  if (files?.length) item.append(filesView(files));
+   if (reaction) {
+     const badge = document.createElement('span');
+     badge.className = 'reaction';
+@@ -95,18 +183,23 @@ function messageItem({ role, text, reaction }) {
+   return item;
+ }
+ 
+-function renderMessages(messages, connected) {
++let lastState = null;
++let workingTimer = null;
++
++function renderMessages(messages, connected, call) {
+   const nearBottom = messagesEl.parentElement.scrollHeight - messagesEl.parentElement.scrollTop
+     - messagesEl.parentElement.clientHeight < 80;
+-  const items = messages.map(messageItem);
+-  // Until the first words of a reply arrive, the user's message is all there is to look at.
+-  if (connected && messages.at(-1)?.role === 'user') {
+-    const waiting = document.createElement('li');
+-    waiting.className = 'message waiting';
+-    waiting.textContent = 'Shy is thinking…';
+-    items.push(waiting);
++  const working = connected ? workingOn(messages, call) : null;
++  messagesEl.replaceChildren(...messages.map((m, i) => messageItem(m, working && i === messages.length - 1)).filter(Boolean));
++  // One element for the whole turn, so its animation does not restart on every update.
++  const workingEl = $('working');
++  workingEl.hidden = !working;
++  workingEl.textContent = working ?? '';
++  workingEl.title = working ?? '';
++  clearTimeout(workingTimer);
++  if (call?.endedAt && Date.now() - call.endedAt < RECENT_CALL_MS) {
++    workingTimer = setTimeout(() => render(lastState), RECENT_CALL_MS - (Date.now() - call.endedAt));
+   }
+-  messagesEl.replaceChildren(...items);
+   $('chat-empty').hidden = messages.length > 0;
+   if (nearBottom) messagesEl.parentElement.scrollTop = messagesEl.parentElement.scrollHeight;
+ }
+@@ -122,28 +215,105 @@ function renderLog(log) {
+     head.textContent = entry.tool;
+     const meta = document.createElement('div');
+     meta.className = 'meta';
+-    meta.textContent = [time, entry.host, entry.error].filter(Boolean).join(' · ');
++    meta.textContent = [time, entry.detail ?? entry.host, entry.error].filter(Boolean).join(' · ');
+     item.append(head, meta);
+     return item;
+   }));
+ }
+ 
+-function render({ status, configured, log, messages = [], approvals = [] }) {
++function render(state) {
++  const { status, configured, log, messages = [], approvals = [] } = state;
++  lastState = state;
+   statusEl.textContent = status;
+   statusEl.dataset.state = status.split(':')[0];
+   $('setup').hidden = configured;
+   $('approvals').replaceChildren(...approvals.map(approvalCard));
+-  renderMessages(messages, status === 'connected');
++  renderMessages(messages, status === 'connected', log[0]);
+   renderLog(log);
+   $('send').disabled = status !== 'connected';
+ }
+ 
+-function send() {
++// Slack takes files of up to a gigabyte, but each one crosses the extension's messaging as base64.
++const MAX_FILE = 20 * 1024 * 1024;
++const MAX_TOTAL = 50 * 1024 * 1024;
++let attachments = [];
++
++async function thumbnail(file) {
++  if (!file.type.startsWith('image/')) return null;
++  try {
++    const bitmap = await createImageBitmap(file);
++    const scale = Math.min(1, 240 / Math.max(bitmap.width, bitmap.height));
++    const canvas = document.createElement('canvas');
++    canvas.width = Math.round(bitmap.width * scale);
++    canvas.height = Math.round(bitmap.height * scale);
++    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
++    return canvas.toDataURL('image/jpeg', 0.8);
++  } catch {
++    return null;
++  }
++}
++
++function renderAttachments() {
++  $('attachments').replaceChildren(...attachments.map((attachment) => {
++    const item = document.createElement('li');
++    item.className = 'attachment';
++    item.title = attachment.file.name;
++    if (attachment.thumb) {
++      const img = document.createElement('img');
++      img.src = attachment.thumb;
++      img.alt = '';
++      item.append(img);
++    }
++    const name = document.createElement('span');
++    name.className = 'name';
++    name.textContent = attachment.file.name;
++    const remove = document.createElement('button');
++    remove.type = 'button';
++    remove.textContent = '×';
++    remove.setAttribute('aria-label', `Remove ${attachment.file.name}`);
++    remove.addEventListener('click', () => {
++      attachments = attachments.filter((a) => a !== attachment);
++      renderAttachments();
++    });
++    item.append(name, remove);
++    return item;
++  }));
++}
++
++async function addFiles(files) {
++  for (const file of files) {
++    const total = attachments.reduce((sum, a) => sum + a.file.size, 0) + file.size;
++    if (file.size > MAX_FILE || total > MAX_TOTAL) {
++      chrome.runtime.sendMessage({ type: 'chat-note', text: `${file.name} is too large to send from here; Talk to Shy takes files up to 20 MB, 50 MB in all.` });
++      continue;
++    }
++    attachments.push({ file, thumb: await thumbnail(file) });
++  }
++  renderAttachments();
++  input.focus();
++}
++
++function base64(file) {
++  return new Promise((resolve, reject) => {
++    const reader = new FileReader();
++    reader.onload = () => resolve(reader.result.slice(reader.result.indexOf(',') + 1));
++    reader.onerror = () => reject(reader.error);
++    reader.readAsDataURL(file);
++  });
++}
++
++async function send() {
+   const text = input.value.trim();
+-  if (!text || $('send').disabled) return;
+-  chrome.runtime.sendMessage({ type: 'chat-send', text });
++  if ((!text && !attachments.length) || $('send').disabled) return;
++  const sending = attachments;
++  attachments = [];
+   input.value = '';
++  renderAttachments();
+   resize();
++  const files = await Promise.all(sending.map(async ({ file, thumb }) => ({
++    name: file.name, type: file.type, size: file.size, thumb, data: await base64(file),
++  })));
++  chrome.runtime.sendMessage({ type: 'chat-send', text, files });
+ }
+ 
+ function resize() {
+@@ -163,6 +333,33 @@ input.addEventListener('keydown', (event) => {
+   }
+ });
+ input.addEventListener('input', resize);
++input.addEventListener('paste', (event) => {
++  const files = [...event.clipboardData.files];
++  if (!files.length) return;
++  event.preventDefault();
++  addFiles(files);
++});
++$('attach').addEventListener('click', () => $('files').click());
++$('files').addEventListener('change', () => {
++  addFiles([...$('files').files]);
++  $('files').value = '';
++});
++// Files dropped anywhere on the panel are attached; the box shows where they go.
++const dragsFiles = (event) => event.dataTransfer?.types.includes('Files');
++document.addEventListener('dragover', (event) => {
++  if (!dragsFiles(event)) return;
++  event.preventDefault();
++  $('box').classList.add('dropping');
++});
++document.addEventListener('dragleave', (event) => {
++  if (!event.relatedTarget) $('box').classList.remove('dropping');
++});
++document.addEventListener('drop', (event) => {
++  $('box').classList.remove('dropping');
++  if (!dragsFiles(event)) return;
++  event.preventDefault();
++  addFiles([...event.dataTransfer.files]);
++});
+ $('new-chat').addEventListener('click', () => chrome.runtime.sendMessage({ type: 'chat-new' }));
+ $('more').addEventListener('click', () => {
+   const open = $('more-view').hidden;

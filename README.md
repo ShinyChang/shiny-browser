@@ -67,11 +67,18 @@ browser and its WebMCP tools:
 ### Talk to Shy
 
 [talk-to-shy/](talk-to-shy) lets an agent on another machine, such as a chat bot, work with the
-tabs you have open. It offers four MCP tools: `list_tabs` (titles and URLs in the current window),
-`read_page`, `list_webmcp_tools` and `call_webmcp_tool`. The last three work on any site until you
-turn off "Use any site without asking" in its settings; then a site you have not listed waits
-until you allow it. A WebMCP tool that changes the page waits in the side panel until you click
-Allow, and the toolbar button counts the requests waiting; the panel also lists every call.
+tabs you have open. Its MCP tools read (`list_tabs`, `read_page`, `screenshot`), drive with real
+input (`click`, `type_text`, `press_key`, `scroll`, `navigate`), run scripts (`run_script`), read the
+debugger's network log (`network_requests`, including requests that failed before any response,
+and `network_request` for headers and body, with credentials hidden) and use a page's WebMCP tools
+(`list_webmcp_tools`, `call_webmcp_tool`). With "Use and drive any site without
+asking" on, the default, all of them work on any site without a prompt. Turn it off and a site you
+have not listed waits until you allow it, and so does each kind of action on a site (driving,
+scripts, a WebMCP tool that changes the page): the side panel shows the request, the toolbar
+button counts the ones waiting, and the panel lists every call. While the agent works, a line under
+the chat says what it is doing (thinking, the command it runs, the browser tool it uses), and the
+tools a reply used fold up under it instead of sitting in the text. Shift+Cmd+S opens and closes
+the panel; `chrome://extensions/shortcuts` changes the key.
 
 An extension cannot accept connections, so [agent-relay/](agent-relay) sits in between: agents
 speak MCP over HTTP to `/mcp`, and the extension keeps a WebSocket open to `/extension`. Both
@@ -84,6 +91,13 @@ example with a Cloudflare Tunnel whose ingress rule has `path: ^/extension$`, an
 local. Then load `talk-to-shy/` from `chrome://extensions` with Developer mode on, open its side
 panel and enter the relay's address and the token. It reconnects within seconds when the relay
 or the tunnel restarts.
+
+With `SLACK_CHANNEL` and `SLACK_AGENT` (the agent's Slack user id) set, the chat goes through
+Slack: each panel conversation is a thread in that channel, posted as you with a user token read
+from `~/.config/shy/slack-user-token` (scopes `chat:write`, `channels:history`, `groups:history`,
+`files:read`, `files:write`), and replies typed in Slack show up in the panel. Every message
+mentions the agent, because Slack marks user-token posts with the app's bot id and agents that
+ignore other bots' unmentioned messages would skip them.
 
 ### Also
 

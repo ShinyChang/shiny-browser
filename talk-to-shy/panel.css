@@ -112,7 +112,31 @@ pre {
   padding: 6px 10px;
 }
 .message.error { color: var(--bad); font-size: 12px; }
-.message.waiting { color: var(--muted); font-size: 12px; }
+.working {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.working::before {
+  content: '';
+  display: inline-block;
+  vertical-align: middle;
+  margin: -2px 6px 0 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--wait);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse { 50% { opacity: 0.3; transform: scale(0.7); } }
+@media (prefers-reduced-motion: reduce) { .working::before { animation: none; } }
+.tool-calls { font-size: 12px; color: var(--muted); }
+.tool-calls summary { cursor: pointer; width: max-content; }
+.tool-calls ul { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 2px; }
+.tool-calls li { font-family: ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
 .reaction { justify-self: end; font-size: 12px; }
 .empty { margin: 0; color: var(--muted); }
 
@@ -130,17 +154,71 @@ textarea:disabled { opacity: 0.5; }
 .settings button { justify-self: start; margin-top: 6px; }
 .saved { color: var(--ok); font-size: 12px; }
 
-.composer {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 10px 12px 12px;
-  border-top: 1px solid var(--line);
+.message .files { display: flex; flex-wrap: wrap; gap: 6px; }
+.message .files img { display: block; max-width: 220px; max-height: 220px; border-radius: 6px; }
+
+.composer { padding: 8px 10px 10px; }
+.box {
+  display: grid;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--field);
 }
-.composer textarea {
-  flex: 1;
+.box:focus-within { border-color: var(--muted); }
+.box.dropping { border-color: var(--wait); border-style: dashed; }
+.box textarea {
+  border: 0;
+  background: transparent;
   resize: none;
   font: 13px/1.45 system-ui, sans-serif;
-  padding: 8px 10px;
-  max-height: 160px;
+  padding: 10px 12px 2px;
+  max-height: 200px;
+}
+.box textarea:focus-visible { outline: none; }
+.tools { display: flex; justify-content: space-between; align-items: center; padding: 2px 6px 6px; }
+button.icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+}
+button.icon:hover:not(:disabled) { background: var(--line); color: var(--fg); }
+button.icon svg { width: 18px; height: 18px; }
+#attach svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
+button.send { color: var(--ok); }
+button.send svg { fill: currentColor; }
+.attachments { list-style: none; margin: 0; padding: 8px 8px 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.attachments:empty { display: none; }
+.attachment {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 48px;
+  max-width: 180px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 12px;
+  overflow: hidden;
+}
+.attachment img { width: 48px; height: 48px; object-fit: cover; }
+.attachment .name { padding: 0 24px 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.attachment img + .name { display: none; }
+.attachment button {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 12px;
+  line-height: 18px;
 }
