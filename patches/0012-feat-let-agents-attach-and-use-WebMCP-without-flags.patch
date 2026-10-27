@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shiny <owner@shinychang.net>
+Date: Tue, 27 Oct 2026 12:47:40 +0800
+Subject: [PATCH] feat: let agents attach and use WebMCP without flags
+
+- WebMCP is on, so pages can register tools with document.modelContext.
+- Remote debugging starts in chrome://inspect's approval mode: agents find
+  the port in DevToolsActivePort and every connection asks the user first.
+- The approval dialog names Shiny instead of Chrome.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
+---
+ chrome/app/generated_resources.grd                            | 2 +-
+ chrome/browser/browser_process_impl.cc                        | 4 +++-
+ .../blink/renderer/platform/runtime_enabled_features.json5    | 3 ++-
+ 3 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/chrome/app/generated_resources.grd b/chrome/app/generated_resources.grd
+index 21e5fd0d92..64a0b86f53 100644
+--- a/chrome/app/generated_resources.grd
++++ b/chrome/app/generated_resources.grd
+@@ -4773,7 +4773,7 @@ are declared in tools/grit/grit_args.gni.
+         Allow remote debugging?
+       </message>
+       <message name="IDS_DEV_TOOLS_CONNECTION_DIALOG_MESSAGE_PART_1" desc="Message displayed in the dialog asking user to confirm allowing a debugging connection to this browser instance.">
+-        An external app wants full control over this Chrome session to debug it. This includes access to your saved data, cookies and site data, and the ability to navigate to any URL.
++        An external app wants full control over this Shiny session to debug it. This includes access to your saved data, cookies and site data, and the ability to navigate to any URL.
+       </message>
+       <message name="IDS_DEV_TOOLS_CONNECTION_DIALOG_MESSAGE_PART_2" desc="Message displayed in the dialog asking user to confirm allowing a debugging connection to this browser instance.">
+         Only web developers should turn on this feature, and only use it with trusted apps.
+diff --git a/chrome/browser/browser_process_impl.cc b/chrome/browser/browser_process_impl.cc
+index bed9453f15..0e0b24e9a5 100644
+--- a/chrome/browser/browser_process_impl.cc
++++ b/chrome/browser/browser_process_impl.cc
+@@ -1357,7 +1357,9 @@ void BrowserProcessImpl::RegisterPrefs(PrefRegistrySimple* registry) {
+   registry->RegisterBooleanPref(metrics::prefs::kMetricsReportingEnabled,
+                                 GoogleUpdateSettings::GetCollectStatsConsent());
+   registry->RegisterBooleanPref(prefs::kDevToolsRemoteDebuggingAllowed, true);
+-  registry->RegisterBooleanPref(prefs::kDevToolsRemoteDebuggingEnabled, false);
++  // Agents can attach without a trip to chrome://inspect, since every
++  // connection still waits for the user to allow it.
++  registry->RegisterBooleanPref(prefs::kDevToolsRemoteDebuggingEnabled, true);
+ 
+ #if BUILDFLAG(IS_LINUX) && BUILDFLAG(USE_DBUS)
+   os_crypt_async::SecretPortalKeyProvider::RegisterLocalPrefs(registry);
+diff --git a/third_party/blink/renderer/platform/runtime_enabled_features.json5 b/third_party/blink/renderer/platform/runtime_enabled_features.json5
+index 32931ee250..3acbcd3f54 100644
+--- a/third_party/blink/renderer/platform/runtime_enabled_features.json5
++++ b/third_party/blink/renderer/platform/runtime_enabled_features.json5
+@@ -7213,7 +7213,8 @@
+         "WebMCPFormAssociatedCustomElements",
+         "WebMCPTesting"
+       ],
+-      status: "experimental",
++      // Pages can register tools for agents without a flag or an origin trial token.
++      status: "stable",
+     },
+     {
+       name: "WebMCPDeclarativeFileInput",

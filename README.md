@@ -49,6 +49,21 @@ is in [lottie-preview/](lottie-preview), built on
 
 ![The built-in Lottie player paused on a frame of a .lottie file](docs/screenshots/lottie-preview.webp)
 
+### Ready for agents
+
+Shiny starts its remote debugging server at launch, in the approval mode of
+`chrome://inspect/#remote-debugging`: it writes the port to `DevToolsActivePort` in the profile
+directory, and every connection waits until you click Allow. Any app on the Mac can ask, so allow
+only connections you started. The same page turns the server off.
+
+[WebMCP](https://github.com/webmachinelearning/webmcp) is on, so pages can register tools with
+`document.modelContext` for agents to call. To let
+[chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp) drive the running
+browser and its WebMCP tools:
+
+    npx chrome-devtools-mcp@latest --autoConnect --categoryExperimentalWebmcp=true \
+      --userDataDir "$HOME/Library/Application Support/Chromium"
+
 ### Also
 
 - The last session reopens on launch.
