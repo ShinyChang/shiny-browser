@@ -13,7 +13,7 @@ if [ "$latest" = "$current" ] || [ "$(printf '%s\n%s\n' "$current" "$latest" | s
 fi
 title="Chrome stable $latest"
 body="$(cat <<BODY
-Chrome stable for Mac is now **$latest** (Shiny is on $current).
+Chrome stable for Mac is now **$latest** (Shy is on $current).
 
 - Release notes: https://chromereleases.googleblog.com/search/label/Stable%20updates
 - Version history: https://versionhistory.googleapis.com/v1/chrome/platforms/mac/channels/stable/versions

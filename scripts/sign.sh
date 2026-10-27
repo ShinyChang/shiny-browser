@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Signs Shiny.app with a code-signing identity. Without a stable identity macOS
+# Signs Shy.app with a code-signing identity. Without a stable identity macOS
 # treats every build as a new app, dropping keychain access and camera or microphone grants.
 #
-#   scripts/sign.sh Shiny.app IDENTITY [entitlements.plist] [embedded.provisionprofile]
+#   scripts/sign.sh Shy.app IDENTITY [entitlements.plist] [embedded.provisionprofile]
 #
 # IDENTITY is a SHA-1 or name from `security find-identity -v -p codesigning`.
 set -euo pipefail
 
-APP=${1:?usage: scripts/sign.sh Shiny.app IDENTITY [entitlements] [profile]}
-ID=${2:?usage: scripts/sign.sh Shiny.app IDENTITY [entitlements] [profile]}
+APP=${1:?usage: scripts/sign.sh Shy.app IDENTITY [entitlements] [profile]}
+ID=${2:?usage: scripts/sign.sh Shy.app IDENTITY [entitlements] [profile]}
 ENT=${3:-}
 PROFILE=${4:-}
 FW="$APP/Contents/Frameworks/$(plutil -extract CFBundleExecutable raw "$APP/Contents/Info.plist") Framework.framework"

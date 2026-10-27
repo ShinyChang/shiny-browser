@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Rewrites patches/, lottie-preview/ and CHROMIUM_VERSION from a Chromium
-# checkout whose current branch holds Shiny's commits on top of base-<version>.
+# checkout whose current branch holds Shy's commits on top of base-<version>.
 #
 #   scripts/export-patches.sh CHROMIUM_SRC
 set -euo pipefail
@@ -20,5 +20,6 @@ mkdir -p "$REPO/patches"
 git -C "$SRC" format-patch --quiet --binary --zero-commit --no-numbered --no-signature \
   -o "$REPO/patches" "$BASE..HEAD"
 rsync -a --delete "$SRC/chrome/browser/resources/lottie_preview/" "$REPO/lottie-preview/"
+rsync -a --delete "$SRC/chrome/browser/resources/talk_to_shy/" "$REPO/talk-to-shy/"
 echo "$VERSION" > "$REPO/CHROMIUM_VERSION"
 git -C "$REPO" status --short

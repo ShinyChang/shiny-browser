@@ -1,0 +1,1157 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shiny <owner@shinychang.net>
+Date: Tue, 27 Oct 2026 16:36:28 +0800
+Subject: [PATCH] feat: build in Talk to Shy, a side panel for chatting with an
+ agent
+
+- A component extension with a fixed id opens in the side panel from its
+  toolbar button or the palette command "Talk to Shy: Show or Hide Panel".
+- It keeps a WebSocket open to a relay: agents reach it over MCP to list
+  tabs, read pages and run WebMCP tools, and chat goes to an OpenAB agent.
+- Any site can be used by default. A WebMCP tool that changes the page
+  asks first, and "Always allow here" remembers the answer.
+- The toolbar button is pinned once, so unpinning it sticks.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
+---
+ .../allowlist.cc                              |   2 +
+ chrome/browser/extensions/component_loader.cc |   2 +
+ .../component_extension_resources.grd         |   7 +
+ .../resources/talk_to_shy/background.js       | 300 ++++++++++++++++++
+ .../browser/resources/talk_to_shy/defaults.js |   9 +
+ chrome/browser/resources/talk_to_shy/icon.png | Bin 0 -> 8365 bytes
+ .../resources/talk_to_shy/manifest.json       |  32 ++
+ .../browser/resources/talk_to_shy/panel.css   | 146 +++++++++
+ .../browser/resources/talk_to_shy/panel.html  |  58 ++++
+ chrome/browser/resources/talk_to_shy/panel.js | 219 +++++++++++++
+ .../ui/toolbar/toolbar_actions_model.cc       |  23 ++
+ chrome/browser/ui/views/ide/ide_palette.cc    |   8 +
+ extensions/common/constants.h                 |   2 +
+ 13 files changed, 808 insertions(+)
+ create mode 100644 chrome/browser/resources/talk_to_shy/background.js
+ create mode 100644 chrome/browser/resources/talk_to_shy/defaults.js
+ create mode 100644 chrome/browser/resources/talk_to_shy/icon.png
+ create mode 100644 chrome/browser/resources/talk_to_shy/manifest.json
+ create mode 100644 chrome/browser/resources/talk_to_shy/panel.css
+ create mode 100644 chrome/browser/resources/talk_to_shy/panel.html
+ create mode 100644 chrome/browser/resources/talk_to_shy/panel.js
+
+diff --git a/chrome/browser/extensions/component_extensions_allowlist/allowlist.cc b/chrome/browser/extensions/component_extensions_allowlist/allowlist.cc
+index 6115656b58..4a3c1c6fe3 100644
+--- a/chrome/browser/extensions/component_extensions_allowlist/allowlist.cc
++++ b/chrome/browser/extensions/component_extensions_allowlist/allowlist.cc
+@@ -41,6 +41,7 @@ bool IsComponentExtensionAllowlisted(const std::string& extension_id) {
+       extension_misc::kInAppPaymentsSupportAppId,
+       extension_misc::kLottiePreviewExtensionId,
+       extension_misc::kPdfExtensionId,
++      extension_misc::kTalkToShyExtensionId,
+ #if BUILDFLAG(IS_CHROMEOS)
+       extension_misc::kAssessmentAssistantExtensionId,
+       extension_misc::kAccessibilityCommonExtensionId,
+@@ -101,6 +102,7 @@ bool IsComponentExtensionAllowlisted(int manifest_resource_id) {
+     case IDR_NETWORK_SPEECH_SYNTHESIS_MANIFEST:
+     case IDR_NETWORK_SPEECH_SYNTHESIS_MANIFEST_MV3:
+     case IDR_READING_MODE_GDOCS_HELPER_MANIFEST:
++    case IDR_TALK_TO_SHY_MANIFEST:
+     case IDR_WEBSTORE_MANIFEST:
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
+diff --git a/chrome/browser/extensions/component_loader.cc b/chrome/browser/extensions/component_loader.cc
+index 89972cd2d6..e3631edf2b 100644
+--- a/chrome/browser/extensions/component_loader.cc
++++ b/chrome/browser/extensions/component_loader.cc
+@@ -791,6 +791,8 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
+ #endif  // BUILDFLAG(IS_CHROMEOS)
+     Add(IDR_LOTTIE_PREVIEW_MANIFEST,
+         base::FilePath(FILE_PATH_LITERAL("lottie_preview")));
++    Add(IDR_TALK_TO_SHY_MANIFEST,
++        base::FilePath(FILE_PATH_LITERAL("talk_to_shy")));
+   }
+ 
+   AddAimEligibilityExtension();
+diff --git a/chrome/browser/resources/component_extension_resources.grd b/chrome/browser/resources/component_extension_resources.grd
+index ea649eb6f8..3b74f4d321 100644
+--- a/chrome/browser/resources/component_extension_resources.grd
++++ b/chrome/browser/resources/component_extension_resources.grd
+@@ -33,6 +33,13 @@
+       <include name="IDR_LOTTIE_PREVIEW_VIEWER_JS" file="lottie_preview/viewer.js" type="BINDATA" />
+       <include name="IDR_LOTTIE_PREVIEW_DOTLOTTIE_WEB_JS" file="lottie_preview/vendor/dotlottie-web.js" type="BINDATA" />
+       <include name="IDR_LOTTIE_PREVIEW_DOTLOTTIE_PLAYER_WASM" file="lottie_preview/vendor/dotlottie-player.wasm" type="BINDATA" />
++      <include name="IDR_TALK_TO_SHY_MANIFEST" file="talk_to_shy/manifest.json" type="BINDATA" />
++      <include name="IDR_TALK_TO_SHY_BACKGROUND_JS" file="talk_to_shy/background.js" type="BINDATA" />
++      <include name="IDR_TALK_TO_SHY_DEFAULTS_JS" file="talk_to_shy/defaults.js" type="BINDATA" />
++      <include name="IDR_TALK_TO_SHY_PANEL_HTML" file="talk_to_shy/panel.html" type="BINDATA" />
++      <include name="IDR_TALK_TO_SHY_PANEL_CSS" file="talk_to_shy/panel.css" type="BINDATA" />
++      <include name="IDR_TALK_TO_SHY_PANEL_JS" file="talk_to_shy/panel.js" type="BINDATA" />
++      <include name="IDR_TALK_TO_SHY_ICON_PNG" file="talk_to_shy/icon.png" type="BINDATA" />
+ 
+       <!-- Hangout Services extension, included in Google Chrome builds only. -->
+       <if expr="_google_chrome or enable_hangout_services_extension">
+diff --git a/chrome/browser/resources/talk_to_shy/background.js b/chrome/browser/resources/talk_to_shy/background.js
+new file mode 100644
+index 0000000000..e750a678fc
+--- /dev/null
++++ b/chrome/browser/resources/talk_to_shy/background.js
+@@ -0,0 +1,300 @@
++import { DEFAULTS } from './defaults.js';
++
++// Chrome keeps a service worker alive while its WebSocket carries a message at
++// least every 30 seconds.
++const KEEPALIVE_MS = 20000;
++const LOG_SIZE = 50;
++const CHAT_SIZE = 200;
++// Shorter than the relay's call timeout, so the agent hears "declined" rather than a timeout.
++const APPROVAL_TIMEOUT_MS = 150000;
++// A relay or tunnel restart drops the socket; retry within seconds rather than at the next alarm.
++const RETRY_MS = [1000, 2000, 5000, 10000, 20000];
++
++let socket = null;
++let keepalive = null;
++let retries = 0;
++let status = 'disconnected';
++let configured = false;
++const log = [];
++const approvals = new Map();
++let nextApprovalId = 1;
++let chat = { conversation: crypto.randomUUID(), messages: [] };
++const chatLoaded = chrome.storage.local.get(['conversation', 'messages']).then((stored) => {
++  if (stored.conversation) chat = { conversation: stored.conversation, messages: stored.messages ?? [] };
++});
++
++async function settings() {
++  return { ...DEFAULTS, ...(await chrome.storage.local.get(Object.keys(DEFAULTS))) };
++}
++
++async function addSetting(key, value) {
++  const list = (await settings())[key];
++  if (!list.includes(value)) await chrome.storage.local.set({ [key]: [...list, value] });
++}
++
++// Lets the relay tell this browser reconnecting apart from another browser or profile.
++async function instanceId() {
++  const { instance } = await chrome.storage.local.get('instance');
++  if (instance) return instance;
++  const id = crypto.randomUUID();
++  await chrome.storage.local.set({ instance: id });
++  return id;
++}
++
++function state() {
++  return {
++    status,
++    configured,
++    log,
++    messages: chat.messages,
++    approvals: [...approvals.values()].map(({ resolve, timer, ...request }) => request),
++  };
++}
++
++function notifyPanel() {
++  chrome.runtime.sendMessage({ type: 'state', ...state() }).catch(() => {});
++  // The panel cannot open itself, so a waiting request also shows on the toolbar button.
++  chrome.action.setBadgeText({ text: approvals.size ? String(approvals.size) : '' });
++}
++
++// Resolves with "once", "always" or "deny".
++function requestApproval(request) {
++  const id = nextApprovalId++;
++  return new Promise((resolve) => {
++    const timer = setTimeout(() => decide(id, 'deny'), APPROVAL_TIMEOUT_MS);
++    approvals.set(id, { id, at: Date.now(), ...request, resolve, timer });
++    notifyPanel();
++    // The panel may be closed, and Shy has no tab strip to badge.
++    chrome.notifications.create(`approval-${id}`, {
++      type: 'basic',
++      iconUrl: 'icon.png',
++      title: request.kind === 'site' ? `Let your agent use ${request.host}?` : `Allow ${request.tool}?`,
++      message: request.kind === 'site'
++        ? `It wants to run ${request.tool} there. Click to answer in Talk to Shy.`
++        : `Your agent wants to run it on ${request.host}. Click to review it in Talk to Shy.`,
++      requireInteraction: true,
++    });
++  });
++}
++
++function decide(id, choice) {
++  const approval = approvals.get(id);
++  if (!approval) return;
++  approvals.delete(id);
++  chrome.notifications.clear(`approval-${id}`);
++  clearTimeout(approval.timer);
++  approval.resolve(choice);
++  notifyPanel();
++}
++
++function setStatus(next) {
++  status = next;
++  notifyPanel();
++}
++
++async function connect() {
++  if (socket) return;
++  const { relayUrl, token } = await settings();
++  const instance = await instanceId();
++  // The alarm and a retry can both get here while those reads are pending.
++  if (socket) return;
++  configured = Boolean(token);
++  if (!token) return setStatus('no token');
++  const ws = new WebSocket(relayUrl);
++  socket = ws;
++  setStatus('connecting');
++  // The token goes in the first message rather than the URL, which servers and proxies log.
++  ws.onopen = () => {
++    ws.send(JSON.stringify({ type: 'hello', token, instance }));
++    keepalive = setInterval(() => {
++      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' }));
++    }, KEEPALIVE_MS);
++  };
++  ws.onmessage = (event) => {
++    const message = JSON.parse(event.data);
++    if (message.type === 'welcome') {
++      retries = 0;
++      setStatus('connected');
++    } else if (message.type === 'rejected') setStatus(`rejected: ${message.reason}`);
++    else if (message.type === 'call') handleCall(ws, message);
++    else if (message.type.startsWith('chat-')) chatFromRelay(message);
++  };
++  ws.onclose = () => {
++    clearInterval(keepalive);
++    if (socket !== ws) return;
++    socket = null;
++    // Retrying a wrong token cannot help until the settings change.
++    if (status.startsWith('rejected')) return;
++    setStatus('disconnected');
++    setTimeout(connect, RETRY_MS[Math.min(retries++, RETRY_MS.length - 1)]);
++  };
++}
++
++function reconnect() {
++  socket?.close();
++  socket = null;
++  connect();
++}
++
++async function saveChat() {
++  chat.messages.splice(0, chat.messages.length - CHAT_SIZE);
++  notifyPanel();
++  await chrome.storage.local.set({ conversation: chat.conversation, messages: chat.messages });
++}
++
++async function sendChat(text) {
++  await chatLoaded;
++  const id = crypto.randomUUID();
++  chat.messages.push({ id, role: 'user', text, at: Date.now() });
++  if (socket?.readyState === WebSocket.OPEN && status === 'connected') {
++    socket.send(JSON.stringify({ type: 'chat', conversation: chat.conversation, id, text }));
++  } else {
++    chat.messages.push({ id: crypto.randomUUID(), role: 'error', text: 'Shy is not connected to its relay.', at: Date.now() });
++  }
++  await saveChat();
++}
++
++async function chatFromRelay({ type, conversation, messageId, text, emoji, remove }) {
++  await chatLoaded;
++  // A reply to a conversation the user has since cleared has nowhere to go.
++  if (conversation !== chat.conversation) return;
++  const message = chat.messages.find((m) => m.id === messageId);
++  if (type === 'chat-reply') {
++    if (message) message.text = text;
++    else chat.messages.push({ id: messageId, role: 'agent', text, at: Date.now() });
++  } else if (type === 'chat-delete') {
++    chat.messages = chat.messages.filter((m) => m.id !== messageId);
++  } else if (type === 'chat-reaction' && message) {
++    message.reaction = remove ? null : emoji;
++  } else if (type === 'chat-error') {
++    chat.messages.push({ id: crypto.randomUUID(), role: 'error', text, at: Date.now() });
++  }
++  await saveChat();
++}
++
++async function newChat() {
++  await chatLoaded;
++  chat = { conversation: crypto.randomUUID(), messages: [] };
++  await saveChat();
++}
++
++async function handleCall(ws, { id, tool, args }) {
++  const entry = { at: Date.now(), tool, ok: false };
++  try {
++    if (!Object.hasOwn(TOOLS, tool)) throw new Error(`Talk to Shy has no tool named ${tool}`);
++    const content = await TOOLS[tool](args ?? {});
++    entry.ok = true;
++    entry.host = content?.host;
++    ws.send(JSON.stringify({ type: 'result', id, ok: true, content }));
++  } catch (error) {
++    entry.error = error.message;
++    ws.send(JSON.stringify({ type: 'result', id, ok: false, error: error.message }));
++  }
++  log.unshift(entry);
++  log.length = Math.min(log.length, LOG_SIZE);
++  notifyPanel();
++}
++
++// A site the user has not allowed yet waits for them, and "always" adds it to the allowed sites.
++async function targetTab(tabId, tool) {
++  const tab = tabId === undefined
++    ? (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]
++    : await chrome.tabs.get(tabId);
++  if (!tab?.url) throw new Error('There is no tab to use');
++  const url = new URL(tab.url);
++  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('Talk to Shy can only use web pages');
++  const host = url.hostname;
++  const { allowAllSites, allowedHosts } = await settings();
++  if (!allowAllSites && !allowedHosts.includes(host)) {
++    const choice = await requestApproval({ kind: 'site', tool, host, title: tab.title, windowId: tab.windowId });
++    if (choice === 'deny') throw new Error(`The user did not let you use ${host}`);
++    if (choice === 'always') await addSetting('allowedHosts', host);
++  }
++  return { tab, host };
++}
++
++// Runs in the page's own world, where document.modelContext lives.
++async function inPage(tabId, func, args = []) {
++  const [frame] = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func, args });
++  if (frame?.result?.error) throw new Error(frame.result.error);
++  return frame?.result;
++}
++
++function readPage(limit) {
++  return { title: document.title, url: location.href, text: document.body.innerText.slice(0, limit) };
++}
++
++async function listPageTools() {
++  if (!document.modelContext) return { error: 'This page does not offer WebMCP tools' };
++  const tools = await document.modelContext.getTools();
++  return tools.map(({ name, title, description, inputSchema, annotations }) =>
++    ({ name, title, description, inputSchema, annotations }));
++}
++
++async function runPageTool(name, input) {
++  if (!document.modelContext) return { error: 'This page does not offer WebMCP tools' };
++  const tool = (await document.modelContext.getTools()).find((t) => t.name === name);
++  if (!tool) return { error: `This page has no WebMCP tool named ${name}` };
++  // Chromium 153 wanted the input as a JSON string, 155 and later want an object.
++  let output;
++  try {
++    output = await document.modelContext.executeTool(tool, input);
++  } catch (error) {
++    if (!(error instanceof TypeError)) throw error;
++    output = await document.modelContext.executeTool(tool, JSON.stringify(input));
++  }
++  return { output };
++}
++
++const TOOLS = {
++  async list_tabs() {
++    const tabs = await chrome.tabs.query({ lastFocusedWindow: true });
++    return tabs.map(({ id, title, url, active }) => ({ id, title, url, active }));
++  },
++  async read_page({ tabId }) {
++    const { tab, host } = await targetTab(tabId, 'read_page');
++    return { host, ...(await inPage(tab.id, readPage, [50000])) };
++  },
++  async list_webmcp_tools({ tabId }) {
++    const { tab, host } = await targetTab(tabId, 'list_webmcp_tools');
++    return { host, tools: await inPage(tab.id, listPageTools) };
++  },
++  async call_webmcp_tool({ tabId, name, input }) {
++    const { tab, host } = await targetTab(tabId, name);
++    const tools = await inPage(tab.id, listPageTools);
++    const tool = tools.find((t) => t.name === name);
++    if (!tool) throw new Error(`${host} has no WebMCP tool named ${name}`);
++    const key = `${host} ${name}`;
++    if (!tool.annotations?.readOnlyHint && !(await settings()).alwaysAllowedTools.includes(key)) {
++      const choice = await requestApproval({
++        kind: 'tool', tool: name, host, title: tab.title, windowId: tab.windowId, input: JSON.stringify(input ?? {}, null, 2),
++      });
++      if (choice === 'deny') throw new Error(`The user did not allow ${name} on ${host}`);
++      if (choice === 'always') await addSetting('alwaysAllowedTools', key);
++    }
++    return { host, ...(await inPage(tab.id, runPageTool, [name, input ?? {}])) };
++  },
++};
++
++chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
++chrome.storage.onChanged.addListener((changes) => {
++  if (changes.relayUrl || changes.token) reconnect();
++});
++chrome.notifications.onClicked.addListener((notificationId) => {
++  const approval = approvals.get(Number(notificationId.replace('approval-', '')));
++  // A notification click is a user gesture, which sidePanel.open needs; it ends at the first await.
++  if (approval) chrome.sidePanel.open({ windowId: approval.windowId });
++});
++chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
++  if (message.type === 'get-state') {
++    chatLoaded.then(() => sendResponse(state()));
++    return true;
++  }
++  if (message.type === 'decide') decide(message.id, message.choice);
++  else if (message.type === 'chat-send') sendChat(message.text);
++  else if (message.type === 'chat-new') newChat();
++});
++// A service worker stopped while the relay was down has nothing left to wake it.
++chrome.alarms.create('reconnect', { periodInMinutes: 1 });
++chrome.alarms.onAlarm.addListener(() => connect());
++connect();
+diff --git a/chrome/browser/resources/talk_to_shy/defaults.js b/chrome/browser/resources/talk_to_shy/defaults.js
+new file mode 100644
+index 0000000000..042900a04d
+--- /dev/null
++++ b/chrome/browser/resources/talk_to_shy/defaults.js
+@@ -0,0 +1,9 @@
++export const DEFAULTS = {
++  relayUrl: 'wss://shy.shinychang.net/extension',
++  token: '',
++  // When off, a site outside allowedHosts waits for the user to allow it.
++  allowAllSites: true,
++  allowedHosts: ['creator.lottiefiles.com'],
++  // "host tool" pairs the user chose to always allow without asking.
++  alwaysAllowedTools: [],
++};
+diff --git a/chrome/browser/resources/talk_to_shy/icon.png b/chrome/browser/resources/talk_to_shy/icon.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..33379d840ef1612831ab770ebb50b88fde6d9544
+GIT binary patch
+literal 8365
+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
+R^w)*FoRqTUR|$CF{{VW@zMTL7
+
+literal 0
+HcmV?d00001
+
+diff --git a/chrome/browser/resources/talk_to_shy/manifest.json b/chrome/browser/resources/talk_to_shy/manifest.json
+new file mode 100644
+index 0000000000..7698399f24
+--- /dev/null
++++ b/chrome/browser/resources/talk_to_shy/manifest.json
+@@ -0,0 +1,32 @@
++{
++  "manifest_version": 3,
++  "name": "Talk to Shy",
++  "version": "0.2.1",
++  "description": "Lets an agent you trust read and use the sites you allow, with every call shown in a side panel.",
++  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4QZO4SO7Uu5A0Of3r7b1PCaFlLFNyu/Dq3dvnTcvKLi204zeuGBP29g6wqB+W8rbIcBrSo958u2y3fQqycvkbzMfeWc4uCLJ19GIBVrvR6YB9MeagvGMM07l1mZREMRZfm5OF/e0xBpUhOnBAfArqe8uZ+vUcKdjojkeRJJOWY3iv3FLujK9p1CZ76UOL2tRNoqIa654f/f+ntcr59d+6szlXGJjIFnScRP9mthLSX7UevHh0bItJ0bNG/fjIvzvp5vObR7lIRizJUda8fYqXdePKLiNakgtF5n5yZ7T3k/Zt4cmV0rkxDacPWCC2dJcxvVVLpraG7JnABI1d0ZdMQIDAQAB",
++  "icons": {
++    "128": "icon.png"
++  },
++  "permissions": [
++    "alarms",
++    "notifications",
++    "scripting",
++    "sidePanel",
++    "storage",
++    "tabs"
++  ],
++  "host_permissions": [
++    "<all_urls>"
++  ],
++  "background": {
++    "service_worker": "background.js",
++    "type": "module"
++  },
++  "side_panel": {
++    "default_path": "panel.html"
++  },
++  "action": {
++    "default_title": "Talk to Shy",
++    "default_icon": "icon.png"
++  }
++}
+diff --git a/chrome/browser/resources/talk_to_shy/panel.css b/chrome/browser/resources/talk_to_shy/panel.css
+new file mode 100644
+index 0000000000..a9021f6298
+--- /dev/null
++++ b/chrome/browser/resources/talk_to_shy/panel.css
+@@ -0,0 +1,146 @@
++:root {
++  --bg: #f6f7f9;
++  --fg: #171a1f;
++  --muted: #5c6470;
++  --line: #d6dbe2;
++  --field: #ffffff;
++  --mine: #e4ecf7;
++  --ok: #1d7a4e;
++  --bad: #b3261e;
++  --wait: #9a6b00;
++  color-scheme: light;
++}
++
++@media (prefers-color-scheme: dark) {
++  :root {
++    --bg: #15181d;
++    --fg: #e7eaee;
++    --muted: #9aa3ae;
++    --line: #2e343c;
++    --field: #1d2127;
++    --mine: #23303f;
++    --ok: #5cc493;
++    --bad: #f08a80;
++    --wait: #e2b54f;
++    color-scheme: dark;
++  }
++}
++
++* { box-sizing: border-box; }
++html, body { height: 100%; }
++body {
++  margin: 0;
++  background: var(--bg);
++  color: var(--fg);
++  font: 13px/1.5 system-ui, sans-serif;
++  display: flex;
++  flex-direction: column;
++}
++[hidden] { display: none !important; }
++
++.bar {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 8px;
++  padding: 8px 12px;
++  border-bottom: 1px solid var(--line);
++}
++.actions { display: flex; gap: 4px; }
++.status { font-size: 12px; color: var(--muted); }
++.status::before { content: '●'; margin-right: 5px; color: var(--muted); }
++.status[data-state='connected']::before { color: var(--ok); }
++.status[data-state='connecting']::before { color: var(--wait); }
++.status[data-state='rejected']::before { color: var(--bad); }
++
++button {
++  font: inherit;
++  padding: 4px 12px;
++  border-radius: 6px;
++  border: 1px solid var(--line);
++  background: var(--field);
++  color: var(--fg);
++  cursor: pointer;
++}
++button:disabled { opacity: 0.5; cursor: default; }
++button.primary { border-color: var(--ok); color: var(--ok); font-weight: 600; }
++button.ghost { border-color: transparent; background: transparent; color: var(--muted); }
++button.ghost:hover { color: var(--fg); }
++input, textarea {
++  font: 12px ui-monospace, Menlo, monospace;
++  background: var(--field);
++  color: var(--fg);
++  border: 1px solid var(--line);
++  border-radius: 6px;
++  padding: 6px 8px;
++}
++input:focus-visible, textarea:focus-visible, button:focus-visible { outline: 2px solid var(--wait); outline-offset: 1px; }
++
++.card { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; margin: 10px 12px 0; }
++.setup label { color: var(--muted); }
++.setup button { justify-self: start; }
++.approvals:empty { display: none; }
++.approval { border-color: var(--wait); }
++.approval p { margin: 0; }
++.approval .what { font-weight: 600; }
++.buttons { display: flex; flex-wrap: wrap; gap: 6px; }
++pre {
++  margin: 0;
++  max-height: 220px;
++  overflow: auto;
++  font: 11.5px/1.45 ui-monospace, Menlo, monospace;
++  background: var(--field);
++  border: 1px solid var(--line);
++  border-radius: 6px;
++  padding: 6px 8px;
++  white-space: pre-wrap;
++  overflow-wrap: anywhere;
++}
++.meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
++
++.chat, .more { flex: 1; overflow-y: auto; padding: 12px; }
++.messages { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
++.message { display: grid; gap: 6px; max-width: 100%; }
++.message .text { white-space: pre-wrap; overflow-wrap: anywhere; }
++.message code { font: 12px ui-monospace, Menlo, monospace; background: var(--field); border-radius: 4px; padding: 0 3px; }
++.message a { color: inherit; }
++.message.user {
++  justify-self: end;
++  max-width: 85%;
++  background: var(--mine);
++  border-radius: 10px 10px 2px 10px;
++  padding: 6px 10px;
++}
++.message.error { color: var(--bad); font-size: 12px; }
++.message.waiting { color: var(--muted); font-size: 12px; }
++.reaction { justify-self: end; font-size: 12px; }
++.empty { margin: 0; color: var(--muted); }
++
++.more h2 { font-size: 11px; margin: 0 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
++.more h2:not(:first-child) { margin-top: 18px; }
++.log { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
++.log li { padding: 6px 0; border-bottom: 1px solid var(--line); }
++.log .call { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
++.log li[data-ok='false'] .call { color: var(--bad); }
++.settings { display: grid; gap: 6px; }
++.settings label { font-size: 12px; color: var(--muted); margin-top: 4px; }
++.settings label.check { display: flex; align-items: center; gap: 6px; color: var(--fg); }
++.check input { margin: 0; }
++textarea:disabled { opacity: 0.5; }
++.settings button { justify-self: start; margin-top: 6px; }
++.saved { color: var(--ok); font-size: 12px; }
++
++.composer {
++  display: flex;
++  align-items: flex-end;
++  gap: 8px;
++  padding: 10px 12px 12px;
++  border-top: 1px solid var(--line);
++}
++.composer textarea {
++  flex: 1;
++  resize: none;
++  font: 13px/1.45 system-ui, sans-serif;
++  padding: 8px 10px;
++  max-height: 160px;
++}
+diff --git a/chrome/browser/resources/talk_to_shy/panel.html b/chrome/browser/resources/talk_to_shy/panel.html
+new file mode 100644
+index 0000000000..44a10649be
+--- /dev/null
++++ b/chrome/browser/resources/talk_to_shy/panel.html
+@@ -0,0 +1,58 @@
++<!doctype html>
++<html lang="en">
++<head>
++  <meta charset="utf-8">
++  <title>Talk to Shy</title>
++  <link rel="stylesheet" href="panel.css">
++</head>
++<body>
++  <header class="bar">
++    <span id="status" class="status">disconnected</span>
++    <span class="actions">
++      <button id="new-chat" type="button" class="ghost">New chat</button>
++      <button id="more" type="button" class="ghost" aria-expanded="false">More</button>
++    </span>
++  </header>
++
++  <form id="setup" class="card setup" hidden>
++    <label for="setup-token">Paste the token from your relay to connect Shy.</label>
++    <input id="setup-token" type="password" autocomplete="off" spellcheck="false">
++    <button type="submit" class="primary">Connect</button>
++  </form>
++
++  <section id="approvals" class="approvals" aria-live="polite"></section>
++
++  <main id="chat-view" class="chat">
++    <ol id="messages" class="messages"></ol>
++    <p id="chat-empty" class="empty">Ask Shy anything. It can read and use your tabs.</p>
++  </main>
++
++  <section id="more-view" class="more" hidden>
++    <h2>Activity</h2>
++    <ol id="log" class="log"></ol>
++    <p id="log-empty" class="empty">No calls yet. Calls from your agent show up here.</p>
++
++    <h2>Settings</h2>
++    <form id="settings" class="settings">
++      <label for="relay-url">Relay</label>
++      <input id="relay-url" type="url" spellcheck="false">
++      <label for="token">Token</label>
++      <input id="token" type="password" autocomplete="off" spellcheck="false">
++      <label class="check"><input id="allow-all-sites" type="checkbox"> Use any site without asking</label>
++      <label for="allowed-hosts">Allowed sites, one per line</label>
++      <textarea id="allowed-hosts" rows="4" spellcheck="false"></textarea>
++      <label for="always-tools">Tools that run without asking, as "site tool" per line</label>
++      <textarea id="always-tools" rows="3" spellcheck="false"></textarea>
++      <button type="submit">Save</button>
++      <span id="saved" class="saved" hidden>Saved</span>
++    </form>
++  </section>
++
++  <form id="composer" class="composer">
++    <textarea id="input" rows="1" placeholder="Talk to Shy" aria-label="Message"></textarea>
++    <button id="send" type="submit" class="primary">Send</button>
++  </form>
++
++  <script src="panel.js" type="module"></script>
++</body>
++</html>
+diff --git a/chrome/browser/resources/talk_to_shy/panel.js b/chrome/browser/resources/talk_to_shy/panel.js
+new file mode 100644
+index 0000000000..f9c8cfc9bc
+--- /dev/null
++++ b/chrome/browser/resources/talk_to_shy/panel.js
+@@ -0,0 +1,219 @@
++import { DEFAULTS } from './defaults.js';
++
++const $ = (id) => document.getElementById(id);
++const statusEl = $('status');
++const messagesEl = $('messages');
++const input = $('input');
++const form = $('settings');
++
++// Escapes everything, then turns code, bold and links back into elements.
++function inline(text) {
++  const block = document.createElement('div');
++  block.className = 'text';
++  const pattern = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\(https?:\/\/[^)\s]+\))|(https?:\/\/[^\s)]+)/g;
++  let last = 0;
++  for (const match of text.matchAll(pattern)) {
++    block.append(text.slice(last, match.index));
++    const [token] = match;
++    if (match[1] || match[2]) {
++      const el = document.createElement(match[1] ? 'code' : 'strong');
++      el.textContent = match[1] ? token.slice(1, -1) : token.slice(2, -2);
++      block.append(el);
++    } else {
++      const split = token.indexOf('](');
++      const link = document.createElement('a');
++      link.href = match[3] ? token.slice(split + 2, -1) : token;
++      link.textContent = match[3] ? token.slice(1, split) : token;
++      link.target = '_blank';
++      link.rel = 'noreferrer';
++      block.append(link);
++    }
++    last = match.index + token.length;
++  }
++  block.append(text.slice(last));
++  return block;
++}
++
++function markdown(text) {
++  const fragment = document.createDocumentFragment();
++  const parts = text.split(/```[\w-]*\n?([\s\S]*?)(?:```|$)/);
++  parts.forEach((part, index) => {
++    if (index % 2) {
++      const pre = document.createElement('pre');
++      pre.textContent = part;
++      fragment.append(pre);
++    } else if (part.trim()) {
++      fragment.append(inline(part.replace(/^\n+|\n+$/g, '')));
++    }
++  });
++  return fragment;
++}
++
++function approvalCard({ id, kind, tool, host, title, input: toolInput }) {
++  const card = document.createElement('article');
++  card.className = 'card approval';
++  const what = document.createElement('p');
++  what.className = 'what';
++  what.textContent = kind === 'site' ? `Let your agent use ${host}?` : `Run ${tool} on ${host}?`;
++  const where = document.createElement('p');
++  where.className = 'meta';
++  where.textContent = kind === 'site' ? `It wants to run ${tool} on "${title}".` : title;
++  card.append(what, where);
++  if (toolInput) {
++    const code = document.createElement('pre');
++    code.textContent = toolInput.length > 4000 ? `${toolInput.slice(0, 4000)}\n…` : toolInput;
++    card.append(code);
++  }
++  const buttons = document.createElement('div');
++  buttons.className = 'buttons';
++  const choices = kind === 'site'
++    ? [['Allow once', 'once'], ['Always allow', 'always'], ['Decline', 'deny']]
++    : [['Allow', 'once'], ['Always allow here', 'always'], ['Decline', 'deny']];
++  for (const [label, choice] of choices) {
++    const button = document.createElement('button');
++    button.type = 'button';
++    button.textContent = label;
++    if (choice === 'once') button.className = 'primary';
++    button.addEventListener('click', () => chrome.runtime.sendMessage({ type: 'decide', id, choice }));
++    buttons.append(button);
++  }
++  card.append(buttons);
++  return card;
++}
++
++function messageItem({ role, text, reaction }) {
++  const item = document.createElement('li');
++  item.className = `message ${role}`;
++  if (role === 'agent') item.append(markdown(text));
++  else item.append(inline(text));
++  if (reaction) {
++    const badge = document.createElement('span');
++    badge.className = 'reaction';
++    badge.textContent = reaction;
++    item.append(badge);
++  }
++  return item;
++}
++
++function renderMessages(messages, connected) {
++  const nearBottom = messagesEl.parentElement.scrollHeight - messagesEl.parentElement.scrollTop
++    - messagesEl.parentElement.clientHeight < 80;
++  const items = messages.map(messageItem);
++  // Until the first words of a reply arrive, the user's message is all there is to look at.
++  if (connected && messages.at(-1)?.role === 'user') {
++    const waiting = document.createElement('li');
++    waiting.className = 'message waiting';
++    waiting.textContent = 'Shy is thinking…';
++    items.push(waiting);
++  }
++  messagesEl.replaceChildren(...items);
++  $('chat-empty').hidden = messages.length > 0;
++  if (nearBottom) messagesEl.parentElement.scrollTop = messagesEl.parentElement.scrollHeight;
++}
++
++function renderLog(log) {
++  $('log-empty').hidden = log.length > 0;
++  $('log').replaceChildren(...log.map((entry) => {
++    const item = document.createElement('li');
++    item.dataset.ok = entry.ok;
++    const time = new Date(entry.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
++    const head = document.createElement('div');
++    head.className = 'call';
++    head.textContent = entry.tool;
++    const meta = document.createElement('div');
++    meta.className = 'meta';
++    meta.textContent = [time, entry.host, entry.error].filter(Boolean).join(' · ');
++    item.append(head, meta);
++    return item;
++  }));
++}
++
++function render({ status, configured, log, messages = [], approvals = [] }) {
++  statusEl.textContent = status;
++  statusEl.dataset.state = status.split(':')[0];
++  $('setup').hidden = configured;
++  $('approvals').replaceChildren(...approvals.map(approvalCard));
++  renderMessages(messages, status === 'connected');
++  renderLog(log);
++  $('send').disabled = status !== 'connected';
++}
++
++function send() {
++  const text = input.value.trim();
++  if (!text || $('send').disabled) return;
++  chrome.runtime.sendMessage({ type: 'chat-send', text });
++  input.value = '';
++  resize();
++}
++
++function resize() {
++  input.style.height = 'auto';
++  input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
++}
++
++$('composer').addEventListener('submit', (event) => {
++  event.preventDefault();
++  send();
++});
++input.addEventListener('keydown', (event) => {
++  // Enter also confirms a candidate in Chinese and Japanese input methods; only a bare Enter sends.
++  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
++    event.preventDefault();
++    send();
++  }
++});
++input.addEventListener('input', resize);
++$('new-chat').addEventListener('click', () => chrome.runtime.sendMessage({ type: 'chat-new' }));
++$('more').addEventListener('click', () => {
++  const open = $('more-view').hidden;
++  $('more-view').hidden = !open;
++  $('chat-view').hidden = open;
++  $('composer').hidden = open;
++  $('more').textContent = open ? 'Back to chat' : 'More';
++  $('more').setAttribute('aria-expanded', String(open));
++});
++$('setup').addEventListener('submit', async (event) => {
++  event.preventDefault();
++  const token = $('setup-token').value.trim();
++  if (token) await chrome.storage.local.set({ token });
++  $('setup-token').value = '';
++});
++
++chrome.runtime.onMessage.addListener((message) => {
++  if (message.type === 'state') render(message);
++});
++chrome.runtime.sendMessage({ type: 'get-state' }).then(render);
++
++async function loadSettings() {
++  const stored = { ...DEFAULTS, ...(await chrome.storage.local.get(Object.keys(DEFAULTS))) };
++  $('relay-url').value = stored.relayUrl;
++  $('token').value = stored.token;
++  $('allow-all-sites').checked = stored.allowAllSites;
++  $('allowed-hosts').disabled = stored.allowAllSites;
++  $('allowed-hosts').value = stored.allowedHosts.join('\n');
++  $('always-tools').value = stored.alwaysAllowedTools.join('\n');
++}
++await loadSettings();
++// The setup card and "Always allow" in a card change settings while the form is showing them,
++// and saving a stale form would undo them.
++chrome.storage.onChanged.addListener((changes) => {
++  if (Object.keys(DEFAULTS).some((key) => key in changes)) loadSettings();
++});
++$('allow-all-sites').addEventListener('change', (event) => {
++  $('allowed-hosts').disabled = event.target.checked;
++});
++
++const lines = (value) => value.split('\n').map((line) => line.trim()).filter(Boolean);
++form.addEventListener('submit', async (event) => {
++  event.preventDefault();
++  await chrome.storage.local.set({
++    relayUrl: $('relay-url').value.trim(),
++    token: $('token').value.trim(),
++    allowAllSites: $('allow-all-sites').checked,
++    allowedHosts: lines($('allowed-hosts').value),
++    alwaysAllowedTools: lines($('always-tools').value),
++  });
++  $('saved').hidden = false;
++  setTimeout(() => { $('saved').hidden = true; }, 1500);
++});
++input.focus();
+diff --git a/chrome/browser/ui/toolbar/toolbar_actions_model.cc b/chrome/browser/ui/toolbar/toolbar_actions_model.cc
+index 0536936bb6..7b90b7d5b6 100644
+--- a/chrome/browser/ui/toolbar/toolbar_actions_model.cc
++++ b/chrome/browser/ui/toolbar/toolbar_actions_model.cc
+@@ -41,6 +41,8 @@
+ #include "extensions/browser/management_policy.h"
+ #include "extensions/browser/permissions_manager.h"
+ #include "extensions/browser/pref_names.h"
++#include "extensions/browser/pref_types.h"
++#include "extensions/common/constants.h"
+ #include "extensions/browser/uninstall_reason.h"
+ #include "extensions/browser/unloaded_extension_reason.h"
+ #include "extensions/common/extension_set.h"
+@@ -613,6 +615,27 @@ void ToolbarActionsModel::InitializeActionList() {
+     Populate();
+   }
+ 
++  // Talk to Shy starts out pinned, once; a user who unpins it keeps it unpinned.
++  if (!profile_->IsOffTheRecord() &&
++      HasAction(extension_misc::kTalkToShyExtensionId)) {
++    static constexpr extensions::PrefMap kPinnedOnce = {
++        "shy_pinned_once", extensions::PrefType::kBool,
++        extensions::PrefScope::kExtensionSpecific};
++    bool pinned_once = false;
++    extension_prefs_->ReadPrefAsBoolean(extension_misc::kTalkToShyExtensionId,
++                                        kPinnedOnce, &pinned_once);
++    if (!pinned_once) {
++      extension_prefs_->SetBooleanPref(extension_misc::kTalkToShyExtensionId,
++                                       kPinnedOnce, true);
++      auto pinned = extension_prefs_->GetPinnedExtensions();
++      if (!std::ranges::contains(pinned,
++                                 extension_misc::kTalkToShyExtensionId)) {
++        pinned.push_back(extension_misc::kTalkToShyExtensionId);
++        extension_prefs_->SetPinnedExtensions(pinned);
++      }
++    }
++  }
++
+   // Set |pinned_action_ids_| directly to avoid notifying observers that they
+   // have changed even though they haven't.
+   pinned_action_ids_ = GetFilteredPinnedActionIds();
+diff --git a/chrome/browser/ui/views/ide/ide_palette.cc b/chrome/browser/ui/views/ide/ide_palette.cc
+index bf4857ecb8..b9e2d57887 100644
+--- a/chrome/browser/ui/views/ide/ide_palette.cc
++++ b/chrome/browser/ui/views/ide/ide_palette.cc
+@@ -32,6 +32,7 @@
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
+ #include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
++#include "chrome/browser/ui/extensions/extension_side_panel_utils.h"
+ #include "chrome/browser/ui/navigator/browser_navigator.h"
+ #include "chrome/browser/ui/navigator/browser_navigator_params.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
+@@ -50,6 +51,7 @@
+ #include "components/url_formatter/url_formatter.h"
+ #include "components/vector_icons/vector_icons.h"
+ #include "content/public/browser/web_contents.h"
++#include "extensions/common/constants.h"
+ #include "third_party/metrics_proto/omnibox_event.pb.h"
+ #include "ui/base/l10n/time_format.h"
+ #include "ui/base/metadata/metadata_header_macros.h"
+@@ -102,6 +104,7 @@ enum SpecialCommand {
+   kSwapPanes = -4,
+   kExitSplit = -5,
+   kCheckForUpdates = -6,
++  kToggleTalkToShy = -7,
+ };
+ 
+ struct Command {
+@@ -154,6 +157,7 @@ constexpr Command kCommands[] = {
+     {u"Browser: History", IDC_SHOW_HISTORY},
+     {u"Browser: Clear Browsing Data…", IDC_CLEAR_BROWSING_DATA},
+     {u"Browser: Check for Updates…", kCheckForUpdates},
++    {u"Talk to Shy: Show or Hide Panel", kToggleTalkToShy},
+ };
+ 
+ struct Item {
+@@ -308,6 +312,10 @@ void RunCommand(BrowserWindowInterface* browser, int command) {
+     case kCheckForUpdates:
+       CheckForUpdates();
+       return;
++    case kToggleTalkToShy:
++      extensions::side_panel_util::ToggleExtensionSidePanel(
++          browser, extension_misc::kTalkToShyExtensionId);
++      return;
+     default:
+       chrome::ExecuteCommand(browser, command);
+   }
+diff --git a/extensions/common/constants.h b/extensions/common/constants.h
+index 09edc12f0b..806b4d62e2 100644
+--- a/extensions/common/constants.h
++++ b/extensions/common/constants.h
+@@ -299,6 +299,8 @@ inline constexpr char kChromeVoxExtensionId[] =
+ inline constexpr char kPdfExtensionId[] = "mhjfbmdgcfjbbpaeojofohoefgiehjai";
+ inline constexpr char kLottiePreviewExtensionId[] =
+     "gjcjchjdlkdmlmnlmdfjkacjmmicngdf";
++inline constexpr char kTalkToShyExtensionId[] =
++    "nbnhbjlppjnccbnmodgeeijkojlefhih";
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
+ // The extension id of the Office Viewer component extension.

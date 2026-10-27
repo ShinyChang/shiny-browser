@@ -1,9 +1,9 @@
-# shiny-browser
+# shy-browser
 
-Shiny is a personal browser built from Chromium stable for macOS: one toolbar, no tab strip,
+Shy is a personal browser built from Chromium stable for macOS: one toolbar, no tab strip,
 everything a keystroke away.
 
-![Shiny showing a Wikipedia article: one toolbar, no tab strip](docs/screenshots/browse.webp)
+![Shy showing a Wikipedia article: one toolbar, no tab strip](docs/screenshots/browse.webp)
 
 ## Features
 
@@ -51,7 +51,7 @@ is in [lottie-preview/](lottie-preview), built on
 
 ### Ready for agents
 
-Shiny starts its remote debugging server at launch, in the approval mode of
+Shy starts its remote debugging server at launch, in the approval mode of
 `chrome://inspect/#remote-debugging`: it writes the port to `DevToolsActivePort` in the profile
 directory, and every connection waits until you click Allow. Any app on the Mac can ask, so allow
 only connections you started. The same page turns the server off.
@@ -64,6 +64,27 @@ browser and its WebMCP tools:
     npx chrome-devtools-mcp@latest --autoConnect --categoryExperimentalWebmcp=true \
       --userDataDir "$HOME/Library/Application Support/Chromium IDE"
 
+### Talk to Shy
+
+[talk-to-shy/](talk-to-shy) lets an agent on another machine, such as a chat bot, work with the
+tabs you have open. It offers four MCP tools: `list_tabs` (titles and URLs in the current window),
+`read_page`, `list_webmcp_tools` and `call_webmcp_tool`. The last three work on any site until you
+turn off "Use any site without asking" in its settings; then a site you have not listed waits
+until you allow it. A WebMCP tool that changes the page waits in the side panel until you click
+Allow, and the toolbar button counts the requests waiting; the panel also lists every call.
+
+An extension cannot accept connections, so [agent-relay/](agent-relay) sits in between: agents
+speak MCP over HTTP to `/mcp`, and the extension keeps a WebSocket open to `/extension`. Both
+present the token in `~/.config/shy/token`.
+
+    cd agent-relay && npm ci && node server.mjs
+
+The relay listens on 127.0.0.1:8796. To reach Shy wherever it is, publish only `/extension`, for
+example with a Cloudflare Tunnel whose ingress rule has `path: ^/extension$`, and keep `/mcp`
+local. Then load `talk-to-shy/` from `chrome://extensions` with Developer mode on, open its side
+panel and enter the relay's address and the token. It reconnects within seconds when the relay
+or the tunnel restarts.
+
 ### Also
 
 - The last session reopens on launch.
@@ -72,20 +93,20 @@ browser and its WebMCP tools:
 
 ## Build
 
-Shiny is Chromium stable at the version in [CHROMIUM_VERSION](CHROMIUM_VERSION) plus the commits
+Shy is Chromium stable at the version in [CHROMIUM_VERSION](CHROMIUM_VERSION) plus the commits
 in [patches/](patches), one per feature, compiled with [args.gn](args.gn). On a Mac with Xcode
 and 45 GB free:
 
-    git clone https://github.com/ShinyChang/shiny-browser
-    shiny-browser/scripts/build.sh ~/shiny-chromium
+    git clone https://github.com/ShinyChang/shy-browser
+    shy-browser/scripts/build.sh ~/shy-chromium
 
 The script fetches Chromium without its history, applies the patches and builds
-`~/shiny-chromium/src/out/Release/Shiny.app`. On an M1 Max with `JOBS=8` the fetch took 12
+`~/shy-chromium/src/out/Release/Shy.app`. On an M1 Max with `JOBS=8` the fetch took 12
 minutes and the compile 2 hours 40 minutes. Running it again resumes an interrupted fetch or
 build.
 
 The build is ad-hoc signed, so macOS may ask again for keychain access or camera and microphone
-permission after an update. `scripts/sign.sh Shiny.app IDENTITY` signs it with your own
+permission after an update. `scripts/sign.sh Shy.app IDENTITY` signs it with your own
 code-signing identity instead.
 
 ## Updates
@@ -99,7 +120,7 @@ build as an update (below), so installed copies offer it within hours. Once that
 installed, `scripts/export-patches.sh` writes the rebased commits back to `patches/`,
 `lottie-preview/` and `CHROMIUM_VERSION`, and the issue is closed with that commit.
 
-`scripts/publish-update.sh Shiny.app UPDATES_DIR` turns a build into a
+`scripts/publish-update.sh Shy.app UPDATES_DIR` turns a build into a
 [Sparkle](https://sparkle-project.org) update: it adds Sparkle, signs the app and writes the
 archive and `appcast.xml` for any web server to serve. A copy installed from such an archive
 checks the feed every four hours and offers to install newer builds; its About page says whether

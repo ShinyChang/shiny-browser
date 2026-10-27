@@ -10,7 +10,7 @@ on:
         type: boolean
         default: false
       assume_current:
-        description: Pretend Shiny is on this version (testing)
+        description: Pretend Shy is on this version (testing)
         required: false
 
 permissions:

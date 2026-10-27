@@ -1,0 +1,12 @@
+{
+  "name": "shy-relay",
+  "private": true,
+  "type": "module",
+  "description": "Bridges MCP clients and the Shy Agent extension.",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "ws": "8.18.0"
+  }
+}

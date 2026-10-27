@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Talk to Shy</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <header class="bar">
+    <span id="status" class="status">disconnected</span>
+    <span class="actions">
+      <button id="new-chat" type="button" class="ghost">New chat</button>
+      <button id="more" type="button" class="ghost" aria-expanded="false">More</button>
+    </span>
+  </header>
+
+  <form id="setup" class="card setup" hidden>
+    <label for="setup-token">Paste the token from your relay to connect Shy.</label>
+    <input id="setup-token" type="password" autocomplete="off" spellcheck="false">
+    <button type="submit" class="primary">Connect</button>
+  </form>
+
+  <section id="approvals" class="approvals" aria-live="polite"></section>
+
+  <main id="chat-view" class="chat">
+    <ol id="messages" class="messages"></ol>
+    <p id="chat-empty" class="empty">Ask Shy anything. It can read and use your tabs.</p>
+  </main>
+
+  <section id="more-view" class="more" hidden>
+    <h2>Activity</h2>
+    <ol id="log" class="log"></ol>
+    <p id="log-empty" class="empty">No calls yet. Calls from your agent show up here.</p>
+
+    <h2>Settings</h2>
+    <form id="settings" class="settings">
+      <label for="relay-url">Relay</label>
+      <input id="relay-url" type="url" spellcheck="false">
+      <label for="token">Token</label>
+      <input id="token" type="password" autocomplete="off" spellcheck="false">
+      <label class="check"><input id="allow-all-sites" type="checkbox"> Use any site without asking</label>
+      <label for="allowed-hosts">Allowed sites, one per line</label>
+      <textarea id="allowed-hosts" rows="4" spellcheck="false"></textarea>
+      <label for="always-tools">Tools that run without asking, as "site tool" per line</label>
+      <textarea id="always-tools" rows="3" spellcheck="false"></textarea>
+      <button type="submit">Save</button>
+      <span id="saved" class="saved" hidden>Saved</span>
+    </form>
+  </section>
+
+  <form id="composer" class="composer">
+    <textarea id="input" rows="1" placeholder="Talk to Shy" aria-label="Message"></textarea>
+    <button id="send" type="submit" class="primary">Send</button>
+  </form>
+
+  <script src="panel.js" type="module"></script>
+</body>
+</html>

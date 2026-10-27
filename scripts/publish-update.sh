@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Publishes a built Shiny.app as a Sparkle update into UPDATES_DIR, which a web
+# Publishes a built Shy.app as a Sparkle update into UPDATES_DIR, which a web
 # server serves at the directory of FEED_URL.
 #
-#   scripts/publish-update.sh Shiny.app UPDATES_DIR
+#   scripts/publish-update.sh Shy.app UPDATES_DIR
 #
 # SPARKLE_DIR is an unpacked Sparkle release, ED_KEY_FILE the private EdDSA key
 # exported by its generate_keys, SIGN_IDENTITY the identity the installed copy
@@ -11,8 +11,9 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-APP="${1:?usage: scripts/publish-update.sh Shiny.app UPDATES_DIR}"
-UPDATES="${2:?usage: scripts/publish-update.sh Shiny.app UPDATES_DIR}"
+APP="${1:?usage: scripts/publish-update.sh Shy.app UPDATES_DIR}"
+UPDATES="${2:?usage: scripts/publish-update.sh Shy.app UPDATES_DIR}"
+NAME="$(basename "$APP" .app)"
 : "${SPARKLE_DIR:?}" "${ED_KEY_FILE:?}" "${SIGN_IDENTITY:?}" "${FEED_URL:?}"
 mkdir -p "$UPDATES"
 
@@ -36,7 +37,7 @@ SWIFT
 
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
-NEW="$STAGE/Shiny.app"
+NEW="$STAGE/$NAME.app"
 ditto "$APP" "$NEW"
 ditto "$SPARKLE_DIR/Sparkle.framework" "$NEW/Contents/Frameworks/Sparkle.framework"
 
@@ -63,7 +64,7 @@ if [ "$SIGN_IDENTITY" != "-" ]; then
     exit 1
   fi
 fi
-ditto -c -k --sequesterRsrc --keepParent "$NEW" "$UPDATES/Shiny-$short-$n.zip"
+ditto -c -k --sequesterRsrc --keepParent "$NEW" "$UPDATES/$NAME-$short-$n.zip"
 echo "$n" > "$UPDATES/build-number"
 
 # Downloads over the LAN are quick, and deltas of Chromium are slow to make.
@@ -72,4 +73,4 @@ echo "$n" > "$UPDATES/build-number"
 rm -rf "$UPDATES/old_updates"
 # Its cache keeps a whole extracted app per archive and never drops old ones.
 rm -rf "$HOME/Library/Caches/Sparkle_generate_appcast"
-echo "published Shiny $short ($n) in $UPDATES"
+echo "published $NAME $short ($n) in $UPDATES"

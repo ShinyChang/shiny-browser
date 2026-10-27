@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds Shiny on the newest Chrome stable for Mac once it is newer than CHROMIUM_VERSION.
+# Builds Shy on the newest Chrome stable for Mac once it is newer than CHROMIUM_VERSION.
 #
 #   scripts/auto-build.sh BUILDS_DIR
 #
@@ -37,7 +37,7 @@ mkdir -p "$DIR"
 echo "running since $(now)" > "$DIR/status"
 echo "$(now) building $latest in $DIR"
 
-APP="$DIR/src/out/Release/Shiny.app"
+APP="$DIR/src/out/Release/Shy.app"
 if ! caffeinate -ims nice -n 10 "$REPO/scripts/build.sh" "$DIR" "$latest" > "$DIR/build.log" 2>&1; then
   reason="$(grep -m1 '^Patch failed at' "$DIR/build.log" || echo 'build error')"
   result="failed: $reason"
@@ -54,9 +54,9 @@ if gh auth status > /dev/null 2>&1; then
     --json number,title --jq ".[] | select(.title == \"Chrome stable $latest\") | .number" | head -1)" || issue=""
   if [ -n "$issue" ]; then
     if [ "$result" = ok ]; then
-      body="Studio built Shiny on $latest and the post-build checks passed: \`$APP\`"
+      body="Studio built Shy on $latest and the post-build checks passed: \`$APP\`"
     else
-      body="Studio could not build Shiny on $latest ($result). Log: \`$DIR/build.log\`"
+      body="Studio could not build Shy on $latest ($result). Log: \`$DIR/build.log\`"
     fi
     (cd "$REPO" && gh issue comment "$issue" --body "$body" > /dev/null) || echo "$(now) could not comment on #$issue"
   fi

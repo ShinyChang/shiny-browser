@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Builds Shiny: Chromium at CHROMIUM_VERSION plus patches/, compiled with args.gn.
+# Builds Shy: Chromium at CHROMIUM_VERSION plus patches/, compiled with args.gn.
 #
 #   scripts/build.sh WORKDIR [VERSION]
 #
 # WORKDIR receives depot_tools (unless gclient is already on PATH), the Chromium
-# checkout and src/out/Release/Shiny.app. VERSION overrides CHROMIUM_VERSION.
+# checkout and src/out/Release/Shy.app. VERSION overrides CHROMIUM_VERSION.
 # Rerunning it resumes an interrupted fetch or build. JOBS caps the parallel compile jobs.
 set -euo pipefail
 
@@ -53,19 +53,19 @@ fi
 
 # Re-applying touches every patched file, so it only happens when the patches or the base change.
 STAMP="$BASE-$(cat "$REPO"/patches/*.patch | git hash-object --stdin)"
-if [ "$(git -C "$SRC" config --get shiny.applied || true)" != "$STAMP" ]; then
+if [ "$(git -C "$SRC" config --get shy.applied || true)" != "$STAMP" ]; then
   echo "Applying patches"
   # A conflict left by an earlier run would block git am; the patches are applied afresh anyway.
   git -C "$SRC" am --abort > /dev/null 2>&1 || true
-  git -C "$SRC" checkout -q -B shiny "$BASE"
+  git -C "$SRC" checkout -q -B shy "$BASE"
   # git am needs a committer; these commits never leave the checkout.
-  git -C "$SRC" -c user.name=shiny-build -c user.email=shiny-build@localhost -c commit.gpgsign=false \
+  git -C "$SRC" -c user.name=shy-build -c user.email=shy-build@localhost -c commit.gpgsign=false \
     am --quiet --3way "$REPO"/patches/*.patch || {
     echo "A patch did not apply. Resolve it in $SRC, run git am --continue there," >&2
     echo "then scripts/export-patches.sh $SRC and run this script again." >&2
     exit 1
   }
-  git -C "$SRC" config shiny.applied "$STAMP"
+  git -C "$SRC" config shy.applied "$STAMP"
 fi
 
 mkdir -p "$SRC/$OUT"
@@ -73,4 +73,4 @@ cmp -s "$REPO/args.gn" "$SRC/$OUT/args.gn" || cp "$REPO/args.gn" "$SRC/$OUT/args
 cd "$SRC"
 gn gen "$OUT"
 autoninja -C "$OUT" ${JOBS:+-j "$JOBS"} chrome
-echo "Built $SRC/$OUT/Shiny.app"
+echo "Built $SRC/$OUT/Shy.app"
