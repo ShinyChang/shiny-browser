@@ -32,8 +32,8 @@ const tabId = { type: 'integer', description: 'A tab id from list_tabs. Leave it
 const TOOLS = [
   {
     name: 'list_tabs',
-    description: "Lists the tabs in the user's current Shy window with their ids, titles and URLs, marking the one the user is looking at.",
-    inputSchema: { type: 'object', properties: {} },
+    description: "Lists the tabs in every Shy window (incognito excluded) with their ids, window ids, titles and URLs, marking as active the one the user is looking at.",
+    inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Keeps only tabs whose title or URL contains this, ignoring case.' } } },
   },
   {
     name: 'read_page',
@@ -114,6 +114,16 @@ const TOOLS = [
     name: 'navigate',
     description: 'Opens a URL in the tab and waits for the page to load.',
     inputSchema: { type: 'object', properties: { tabId, url: { type: 'string' } }, required: ['url'] },
+  },
+  {
+    name: 'open_tab',
+    description: "Opens a URL in a new tab in the user's window, in the background unless active is true, waits for it to load and returns its tab id.",
+    inputSchema: { type: 'object', properties: { url: { type: 'string' }, active: { type: 'boolean', description: 'Shows the new tab to the user.' } }, required: ['url'] },
+  },
+  {
+    name: 'close_tab',
+    description: 'Closes a tab.',
+    inputSchema: { type: 'object', properties: { tabId: { type: 'integer', description: 'A tab id from list_tabs or open_tab.' } }, required: ['tabId'] },
   },
   {
     name: 'network_requests',

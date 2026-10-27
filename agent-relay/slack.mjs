@@ -93,7 +93,7 @@ function fromBlocks(blocks, names) {
 export function slackChat({ tokenFile, channel, agent, agentName = 'agent', threadsFile, send }) {
   const threads = loadJson(threadsFile);
   let token = null;
-  let me = null;
+  let verified = false;
   let open = null;
   let timer = null;
   let fastUntil = 0;
@@ -163,7 +163,10 @@ export function slackChat({ tokenFile, channel, agent, agentName = 'agent', thre
       if (!existsSync(tokenFile)) return false;
       token = readFileSync(tokenFile, 'utf8').trim();
     }
-    me ??= (await api('auth.test', {})).user_id;
+    if (!verified) {
+      await api('auth.test', {});
+      verified = true;
+    }
     return true;
   }
 
@@ -187,7 +190,8 @@ export function slackChat({ tokenFile, channel, agent, agentName = 'agent', thre
         const reaction = m.reactions?.at(-1)?.name;
         return {
           id: m.ts,
-          role: m.user === me ? 'user' : 'agent',
+          // The person posts through this token, an earlier one or by hand in Slack, so only the agent's own posts are its side.
+          role: m.user === agent ? 'agent' : 'user',
           text: (m.blocks?.length ? fromBlocks(m.blocks, names) : fromSlack(m.text ?? '', names)).replace(new RegExp(`^@${agentName}\\s*`), ''),
           reaction: reaction ? EMOJI[reaction] ?? `:${reaction}:` : null,
           files: await Promise.all((m.files ?? []).map(fileView)),
@@ -242,7 +246,7 @@ export function slackChat({ tokenFile, channel, agent, agentName = 'agent', thre
         if (!(await ready())) throw new Error('Talk to Shy has no Slack token yet.');
         const ts = threads[conversation];
         generation++;
-        // A user-token post still carries the app's bot_id, so the agent treats it as another bot's and answers only when mentioned.
+        // An API post carries the app's bot_id, even with a user token, so the agent treats it as another bot's and answers only when mentioned.
         const body = `<@${agent}> ${text}`.trim();
         const posted = files.length
           ? await postFiles(files, body, ts)

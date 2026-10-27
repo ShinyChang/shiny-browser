@@ -230,7 +230,9 @@ async function describe(tool, args) {
   const on = host ? ` on ${host}` : '';
   const page = host || 'the page';
   switch (tool) {
-    case 'list_tabs': return 'Looking at your tabs';
+    case 'list_tabs': return args.query ? `Looking for "${args.query}" in your tabs` : 'Looking at your tabs';
+    case 'open_tab': return `Opening ${URL.parse(args.url)?.host ?? args.url} in a new tab`;
+    case 'close_tab': return `Closing a tab${on}`;
     case 'read_page': return `Reading ${page}`;
     case 'screenshot': return `Taking a screenshot of ${page}`;
     case 'click': return `Clicking ${args.selector ?? `at ${args.x}, ${args.y}`}${on}`;
@@ -268,12 +270,16 @@ async function handleCall(ws, { id, tool, args }) {
   notifyPanel();
 }
 
+// The built-in panel can see incognito windows, which the user keeps private from it.
+const INCOGNITO = 'Talk to Shy does not use incognito windows';
+
 // A site the user has not allowed yet waits for them, and "always" adds it to the allowed sites.
 async function targetTab(tabId, tool) {
   const tab = tabId === undefined
     ? (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]
     : await chrome.tabs.get(tabId);
   if (!tab?.url) throw new Error('There is no tab to use');
+  if (tab.incognito) throw new Error(INCOGNITO);
   const url = new URL(tab.url);
   if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('Talk to Shy can only use web pages');
   const host = url.hostname;
@@ -477,9 +483,13 @@ async function navigate(tabId, url) {
 }
 
 const TOOLS = {
-  async list_tabs() {
-    const tabs = await chrome.tabs.query({ lastFocusedWindow: true });
-    return tabs.map(({ id, title, url, active }) => ({ id, title, url, active }));
+  // Every window, so a tab elsewhere can be found; active marks the one a call without tabId uses.
+  async list_tabs({ query }) {
+    const [tabs, [current]] = await Promise.all([chrome.tabs.query({}), chrome.tabs.query({ active: true, lastFocusedWindow: true })]);
+    const needle = query?.toLowerCase();
+    return tabs
+      .filter((t) => !t.incognito && (!needle || `${t.title} ${t.url}`.toLowerCase().includes(needle)))
+      .map(({ id, windowId, title, url }) => ({ id, windowId, title, url, active: id === current?.id }));
   },
   async read_page({ tabId }) {
     const { tab, host } = await targetTab(tabId, 'read_page');
@@ -557,6 +567,33 @@ const TOOLS = {
     const { tab, host } = await targetTab(tabId, 'navigate');
     await approveAction(tab, host, 'control', `Let your agent use ${host}?`, `Open ${url}`);
     return { host, ...(await navigate(tab.id, url)) };
+  },
+  // In the background by default, so the agent works without taking over the page the user is on.
+  async open_tab({ url, active = false }) {
+    const target = URL.parse(url);
+    if (target?.protocol !== 'https:' && target?.protocol !== 'http:') throw new Error('Talk to Shy can only open web pages');
+    const host = target.hostname;
+    const focused = await chrome.windows.getLastFocused({ windowTypes: ['normal'] });
+    const window = focused.incognito
+      ? (await chrome.windows.getAll({ windowTypes: ['normal'] })).find((w) => !w.incognito)
+      : focused;
+    if (!window) throw new Error('Open a regular Shy window first; Talk to Shy does not use incognito windows');
+    await approveAction({ title: url, windowId: window.id }, host, 'control', `Let your agent use ${host}?`, `Open ${url} in a new tab`);
+    const created = await chrome.tabs.create({ url, active, windowId: window.id });
+    for (let i = 0; i < 60 && (await chrome.tabs.get(created.id)).status !== 'complete'; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    const { id, windowId, title, url: loaded } = await chrome.tabs.get(created.id);
+    return { host, id, windowId, title, url: loaded };
+  },
+  async close_tab({ tabId }) {
+    if (tabId === undefined) throw new Error('close_tab needs a tabId from list_tabs');
+    const tab = await chrome.tabs.get(tabId);
+    if (tab.incognito) throw new Error(INCOGNITO);
+    const host = URL.parse(tab.url)?.hostname ?? '';
+    await approveAction(tab, host, 'control', `Let your agent use ${host}?`, `Close "${tab.title}"`);
+    await chrome.tabs.remove(tabId);
+    return { host, closed: tabId, title: tab.title };
   },
   async network_requests({ tabId, reload, failedOnly, filter, limit = 100 }) {
     const { tab, host } = await targetTab(tabId, 'network_requests');

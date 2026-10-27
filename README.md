@@ -70,7 +70,8 @@ browser and its WebMCP tools:
 ### Talk to Shy
 
 [talk-to-shy/](talk-to-shy) lets an agent on another machine, such as a chat bot, work with the
-tabs you have open. Its MCP tools read (`list_tabs`, `read_page`, `screenshot`), drive with real
+tabs you have open. Its MCP tools read (`list_tabs` across windows, `read_page`, `screenshot`),
+open and close tabs of their own (`open_tab` works in the background, `close_tab`), drive with real
 input (`click`, `type_text`, `press_key`, `scroll`, `navigate`), run scripts (`run_script`), read the
 debugger's network log (`network_requests`, including requests that failed before any response,
 and `network_request` for headers and body, with credentials hidden) and use a page's WebMCP tools
@@ -96,11 +97,17 @@ panel and enter the relay's address and the token. It reconnects within seconds 
 or the tunnel restarts.
 
 With `SLACK_CHANNEL` and `SLACK_AGENT` (the agent's Slack user id) set, the chat goes through
-Slack: each panel conversation is a thread in that channel, posted as you with a user token read
-from `~/.config/shy/slack-user-token` (scopes `chat:write`, `channels:history`, `groups:history`,
-`files:read`, `files:write`), and replies typed in Slack show up in the panel. Every message
-mentions the agent, because Slack marks user-token posts with the app's bot id and agents that
-ignore other bots' unmentioned messages would skip them.
+Slack: each panel conversation is a thread in that channel, posted with the token in
+`SLACK_TOKEN_FILE` (default `~/.config/shy/slack-user-token`), and replies typed in Slack show up
+in the panel. A user token posts as you; a bot token posts as that bot, so one bot such as "Shy"
+can speak for several people. Either needs `chat:write`, `channels:history`, `groups:history`,
+`files:read` and `files:write`, and a bot has to be invited to the channel. Every message
+mentions the agent, because Slack marks API posts with the app's bot id and agents that ignore
+other bots' unmentioned messages would skip them.
+
+One relay serves one browser, one channel and one agent. For another person, run a second relay
+with its own `PORT`, `TOKEN_FILE`, `SLACK_CHANNEL`, `SLACK_AGENT` and `SLACK_THREADS_FILE`, and
+publish its `/extension` under its own hostname.
 
 ### Also
 
