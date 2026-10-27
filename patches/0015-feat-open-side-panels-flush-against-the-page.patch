@@ -1,0 +1,100 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shiny <owner@shinychang.net>
+Date: Tue, 27 Oct 2026 21:11:48 +0800
+Subject: [PATCH] feat: open side panels flush against the page
+
+The page no longer shrinks into an inset, rounded box when a side panel
+opens: no inset, no shadow box, and only a separator between the page
+and the panel.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
+---
+ chrome/browser/ui/layout_constants.cc               |  3 ++-
+ .../frame/layout/browser_view_tabbed_layout_impl.cc | 12 +++++-------
+ chrome/browser/ui/views/side_panel/side_panel.cc    | 13 ++++---------
+ 3 files changed, 11 insertions(+), 17 deletions(-)
+
+diff --git a/chrome/browser/ui/layout_constants.cc b/chrome/browser/ui/layout_constants.cc
+index 5b86765bfa..a0f31ecd44 100644
+--- a/chrome/browser/ui/layout_constants.cc
++++ b/chrome/browser/ui/layout_constants.cc
+@@ -140,7 +140,8 @@ int GetLayoutConstant(LayoutConstant constant) {
+     case LayoutConstant::kLocationBarMargin:
+       return touch_ui ? 12 : 9;
+     case LayoutConstant::kSidePanelInset:
+-      return 8;
++      // Shy keeps the page flush with the window when a side panel opens.
++      return 0;
+     case LayoutConstant::kPageInfoIconSize:
+       return 20;
+     case LayoutConstant::kDownloadIconSize:
+diff --git a/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc b/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
+index 389c6f8c6e..ab9e1ef69e 100644
+--- a/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
++++ b/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
+@@ -238,9 +238,9 @@ BrowserViewTabbedLayoutImpl::CalculateSeparatorInfo() const {
+   switch (layout_data_->window_state) {
+     case WindowState::kNormal:
+     case WindowState::kMaximized: {
+-      // In content-height mode, split view outline serves as shadow box.
+-      info.shadow_box =
+-          has_side_panel && (has_infobar || !is_split_view || !is_force_to_top);
++      // Shy keeps the page flush with the window when a side panel opens, as
++      // it is without one, so the page never shrinks into a shadow box.
++      info.shadow_box = false;
+       const bool suppress_separator = info.shadow_box && is_force_to_top;
+       info.multi_contents_separator = !suppress_separator && !has_infobar;
+       info.top_container_separator = !suppress_separator && has_infobar;
+@@ -250,8 +250,7 @@ BrowserViewTabbedLayoutImpl::CalculateSeparatorInfo() const {
+       break;
+     }
+     case WindowState::kFullscreen:
+-      // In fullscreen, split view outline serves as shadow box.
+-      info.shadow_box = has_side_panel && (has_infobar || !is_split_view);
++      info.shadow_box = false;
+       // Mac and ChromeOS display separators on their slide-in top containers.
+       // However, if top container elements are not visible (for example,
+       // because they are offscreen), the separator is not shown.
+@@ -260,8 +259,7 @@ BrowserViewTabbedLayoutImpl::CalculateSeparatorInfo() const {
+       info.side_panel_top_padding = true;
+       break;
+     case WindowState::kFullscreenWithToolbar:
+-      // In fullscreen, split view outline serves as shadow box.
+-      info.shadow_box = has_side_panel && (has_infobar || !is_split_view);
++      info.shadow_box = false;
+       info.top_container_separator = !info.shadow_box && would_have_separator;
+       info.adjust_for_missing_separator =
+           info.shadow_box && would_have_separator;
+diff --git a/chrome/browser/ui/views/side_panel/side_panel.cc b/chrome/browser/ui/views/side_panel/side_panel.cc
+index 48d9dd0848..9b3be14e5a 100644
+--- a/chrome/browser/ui/views/side_panel/side_panel.cc
++++ b/chrome/browser/ui/views/side_panel/side_panel.cc
+@@ -72,8 +72,9 @@ constexpr BrowserAnimationGroup kAnimationGroup =
+ 
+ // This thickness includes the solid-color background and the inner round-rect
+ // border-color stroke. It does not include the outer-color separator.
++// Shy draws the panel flush against the page, with only a separator between.
+ int GetBorderThickness() {
+-  return 8 + views::Separator::kThickness;
++  return views::Separator::kThickness;
+ }
+ 
+ // This is how many units of the toolbar are essentially expected to be
+@@ -217,14 +218,8 @@ class ContentParentView : public views::View, public views::ViewObserver {
+                                     base::Unretained(this)));
+   }
+ 
+-  gfx::RoundedCornersF GetRoundedCorners() {
+-    ChromeDistanceMetric corner_radius =
+-        ChromeDistanceMetric::DISTANCE_SIDE_PANEL_CONTENT_RADIUS;
+-    return GetLayoutProvider()
+-               ? gfx::RoundedCornersF(
+-                     GetLayoutProvider()->GetDistanceMetric(corner_radius))
+-               : gfx::RoundedCornersF();
+-  }
++  // Flush content has no inset for rounded corners to sit in.
++  gfx::RoundedCornersF GetRoundedCorners() { return gfx::RoundedCornersF(); }
+ 
+   const raw_ptr<BrowserView> browser_view_;
+   base::ScopedObservation<views::View, views::ViewObserver> view_observation_{
