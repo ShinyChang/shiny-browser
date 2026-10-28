@@ -7,7 +7,7 @@
 # "ok" or "failed: <reason>", and deleting it allows another try. AFTER_BUILD,
 # when set, runs with the app's path and has to succeed for "ok". When gh is
 # logged in, the version's chrome-update issue gets the result as a comment.
-# Only the newest build is kept. ASSUME_CURRENT overrides CHROMIUM_VERSION.
+# Older builds are removed once a newer one is ok. ASSUME_CURRENT overrides CHROMIUM_VERSION.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -62,7 +62,9 @@ if gh auth status > /dev/null 2>&1; then
   fi
 fi
 
-# Each build takes about 41 GB, so only the newest stays.
+# Each build takes about 41 GB, so only the newest stays, but a failed build leaves the last good one
+# in place: it is the tree to rebase the patches from.
+[ "$result" = ok ] || exit 0
 for v in $(ls -1 "$BUILDS" | grep -E '^[0-9]+(\.[0-9]+)+$' | sort -rV | awk 'NR > 1' || true); do
   if [ -f "$BUILDS/$v/status" ] && ! grep -q '^running' "$BUILDS/$v/status"; then
     echo "$(now) removing old build $v"
