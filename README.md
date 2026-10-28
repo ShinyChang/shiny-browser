@@ -90,11 +90,14 @@ present the token in `~/.config/shy/token`.
 
     cd agent-relay && npm ci && node server.mjs
 
-The relay listens on 127.0.0.1:8796. To reach Shy wherever it is, publish only `/extension`, for
-example with a Cloudflare Tunnel whose ingress rule has `path: ^/extension$`, and keep `/mcp`
-local. Then load `talk-to-shy/` from `chrome://extensions` with Developer mode on, open its side
-panel and enter the relay's address and the token. It reconnects within seconds when the relay
-or the tunnel restarts.
+The relay listens on 127.0.0.1:8796. To reach Shy wherever it is, publish `/extension`, for
+example with a Cloudflare Tunnel whose ingress rule has `path: ^/extension$`. Keep `/mcp` local,
+or, for agents on other machines, publish it under a hostname of its own behind Cloudflare Access
+with a Service Auth policy, so that only requests carrying the service token's
+`CF-Access-Client-Id` and `CF-Access-Client-Secret` reach the relay's own token check. Then load
+`talk-to-shy/` from `chrome://extensions` with Developer mode on, open its side panel and enter
+the relay's address and the token. It reconnects within seconds when the relay or the tunnel
+restarts.
 
 With `SLACK_CHANNEL` and `SLACK_AGENT` (the agent's Slack user id) set, the chat goes through
 Slack: each panel conversation is a thread in that channel, posted with the token in

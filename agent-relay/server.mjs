@@ -7,7 +7,8 @@
 //   SLACK_CHANNEL=C0123 SLACK_AGENT=U0456 SLACK_AGENT_NAME=fugu node server.mjs
 //
 // Agents send the token as a bearer token, OpenAB as ?token=, and the extension in its first message.
-// Publish only /extension (through a Cloudflare Tunnel, say); /mcp and /gateway stay local.
+// Publish /extension (through a Cloudflare Tunnel, say); keep /gateway local, and /mcp too unless
+// something like Cloudflare Access guards it.
 import http from 'node:http';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
