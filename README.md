@@ -71,13 +71,18 @@ browser and its WebMCP tools:
 
 [talk-to-shy/](talk-to-shy) lets an agent on another machine, such as a chat bot, work with the
 tabs you have open. Its MCP tools read (`list_tabs` across windows, `read_page` as text or as an
-accessibility tree with a ref for each element, `screenshot`), open and close tabs of their own
-(`open_tab` works in the background, `close_tab`), drive with real input (`click`, `type_text`,
-`press_key`, `scroll`, `navigate`; an element is a ref, a CSS selector or a point), run scripts
-(`run_script`), read the debugger's network log (`network_requests`, including requests that failed
-before any response, and `network_request` for headers and body, with credentials hidden), use a
-page's WebMCP tools (`list_webmcp_tools`, `call_webmcp_tool`) and run several of these in one call
-(`batch`, which stops at the first failure). With "Use and drive any site without
+accessibility tree with a ref for each element, of the whole page or one part, `screenshot` of the
+view or zoomed in on a region, `console_messages`), open and close tabs of their own (`open_tab`
+works in the background, `close_tab`), drive with real input (`click` with any button, a double or
+triple click and modifiers, `hover`, `type_text`, `press_key` with combinations such as
+`cmd+shift+z`, `scroll`, `drag`, `navigate` including back and forward; an element is a ref, a CSS
+selector or a point), fill in forms (`set_value`, native selects included), resize the window
+(`resize_window`), upload files (`upload_file`, from a URL or content the agent sends, or from a
+path on the Mac, which always asks you first), run scripts (`run_script`), read the debugger's
+network log (`network_requests`, including requests that failed before any response, and
+`network_request` for headers and body, with credentials hidden), use a page's WebMCP tools
+(`list_webmcp_tools`, `call_webmcp_tool`) and run several of these in one call (`batch`, which
+stops at the first failure). With "Use and drive any site without
 asking" on, the default, all of them work on any site without a prompt. Turn it off and a site you
 have not listed waits until you allow it, and so does each kind of action on a site (driving,
 scripts, a WebMCP tool that changes the page): the side panel shows the request, the toolbar
@@ -117,13 +122,13 @@ publish its `/extension` under its own hostname.
 ### Also
 
 - The last session reopens on launch.
+- A link button in the location bar, shown while the pointer is over it, copies the address; a
+  click on the address edits it.
 - Background tabs left idle for 12 hours close themselves; pinned tabs stay.
 - H.264 and AAC playback.
 
 ## Build
 
-- A link button in the location bar, shown while the pointer is over it, copies the address; a
-  click on the address edits it.
 Shy is Chromium stable at the version in [CHROMIUM_VERSION](CHROMIUM_VERSION) plus the commits
 in [patches/](patches), one per feature, compiled with [args.gn](args.gn). On a Mac with Xcode
 and 45 GB free:

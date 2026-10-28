@@ -235,11 +235,20 @@ async function describe(tool, args) {
     case 'close_tab': return `Closing a tab${on}`;
     case 'read_page': return `Reading ${page}`;
     case 'screenshot': return `Taking a screenshot of ${page}`;
-    case 'click': return `Clicking ${args.ref ?? args.selector ?? `at ${args.x}, ${args.y}`}${on}`;
+    case 'click': {
+      const verb = args.button === 'right' ? 'Right-clicking' : args.clickCount === 2 ? 'Double-clicking' : args.clickCount === 3 ? 'Triple-clicking' : 'Clicking';
+      return `${verb} ${args.ref ?? args.selector ?? `at ${args.x}, ${args.y}`}${on}`;
+    }
+    case 'hover': return `Pointing at ${args.ref ?? args.selector ?? `${args.x}, ${args.y}`}${on}`;
+    case 'set_value': return `Setting ${args.ref ?? args.selector}${on}`;
+    case 'resize_window': return `Resizing the window to ${args.width} by ${args.height}`;
     case 'type_text': return `Typing${on}`;
     case 'press_key': return `Pressing ${args.key}${on}`;
     case 'scroll': return `Scrolling ${page}`;
-    case 'navigate': return `Opening ${URL.parse(args.url)?.host ?? args.url}`;
+    case 'drag': return `Dragging${on}`;
+    case 'upload_file': return `Uploading ${args.files?.length ?? 0} file${args.files?.length === 1 ? '' : 's'}${on}`;
+    case 'console_messages': return `${args.reload ? 'Reloading and reading' : 'Reading'} the console${on}`;
+    case 'navigate': return args.url === 'back' || args.url === 'forward' ? `Going ${args.url}${on}` : `Opening ${URL.parse(args.url)?.host ?? args.url}`;
     case 'run_script': return `Running a script${on}`;
     case 'network_requests': return `${args.reload ? 'Reloading and reading' : 'Reading'} the network log${on}`;
     case 'network_request': return `Reading a request${on}`;
@@ -379,6 +388,8 @@ const attached = new Set();
 // about it is still there to read.
 const NETWORK_LIMIT = 500;
 const networks = new Map();
+const CONSOLE_LIMIT = 500;
+const consoles = new Map();
 
 // Resolves true when this call started the recording.
 async function attach(tabId) {
@@ -390,7 +401,11 @@ async function attach(tabId) {
   }
   attached.add(tabId);
   networks.set(tabId, { since: Date.now(), requests: new Map() });
+  consoles.set(tabId, { since: Date.now(), messages: [] });
   await chrome.debugger.sendCommand({ tabId }, 'Network.enable', { maxTotalBufferSize: 20000000, maxResourceBufferSize: 5000000 });
+  // Both send what the page logged before they were enabled, as DevTools shows it when opened late.
+  await chrome.debugger.sendCommand({ tabId }, 'Runtime.enable');
+  await chrome.debugger.sendCommand({ tabId }, 'Log.enable');
   return true;
 }
 
@@ -401,9 +416,75 @@ async function cdp(tabId, method, params = {}) {
 chrome.debugger.onDetach.addListener(({ tabId }) => {
   attached.delete(tabId);
   networks.delete(tabId);
+  consoles.delete(tabId);
 });
 
+const CONSOLE_LEVELS = { error: 'error', assert: 'error', warning: 'warning', debug: 'debug' };
+const where = (url, line) => (url ? `${clip(url, 200)}${Number.isInteger(line) ? `:${line + 1}` : ''}` : undefined);
+
+function previewText(p) {
+  if (p.entries) return p.description;
+  const items = p.properties.map((x) =>
+    `${p.subtype === 'array' ? '' : `${x.name}: `}${x.type === 'string' ? JSON.stringify(x.value) : x.value ?? x.type}`);
+  const list = `${items.join(', ')}${p.overflow ? ', …' : ''}`;
+  if (p.subtype === 'array') return `[${list}]`;
+  return `${p.description === 'Object' ? '' : `${p.description} `}{${list}}`;
+}
+
+function remoteText(o) {
+  if (o.type === 'string') return o.value;
+  if (o.type === 'undefined') return 'undefined';
+  if (o.unserializableValue) return o.unserializableValue;
+  if ('value' in o) return JSON.stringify(o.value);
+  if (o.preview && o.subtype !== 'error') return previewText(o.preview);
+  return o.description ?? o.type;
+}
+
+function consoleText(args = []) {
+  const parts = args.map(remoteText);
+  // %c styles the text after it; its CSS argument is not part of the message.
+  if (args[0]?.type === 'string' && args[0].value.includes('%c')) {
+    parts.splice(1, args[0].value.split('%c').length - 1);
+    parts[0] = parts[0].replaceAll('%c', '');
+  }
+  return clip(parts.join(' '), 2000);
+}
+
+const releasing = new Set();
+
+function recordConsole(tabId, method, params) {
+  const log = consoles.get(tabId);
+  if (!log) return;
+  let message;
+  if (method === 'Runtime.consoleAPICalled') {
+    const frame = params.stackTrace?.callFrames?.[0];
+    message = { level: CONSOLE_LEVELS[params.type] ?? 'info', text: consoleText(params.args), at: params.timestamp, source: where(frame?.url, frame?.lineNumber) };
+  } else if (method === 'Runtime.exceptionThrown') {
+    const d = params.exceptionDetails;
+    message = { level: 'error', text: clip(`${d.text} ${d.exception?.description ?? ''}`.trim(), 2000), at: params.timestamp, source: where(d.url, d.lineNumber) };
+  } else {
+    const e = params.entry;
+    message = { level: e.level === 'verbose' ? 'debug' : e.level, text: clip(e.text, 2000), at: e.timestamp, source: where(e.url, e.lineNumber) ?? e.source };
+  }
+  log.messages.push(message);
+  if (log.messages.length > CONSOLE_LIMIT) log.messages.shift();
+  // The session keeps every logged object alive until its group is released, and only the text is kept here.
+  if (!releasing.has(tabId) && (params.args ?? [params.exceptionDetails?.exception]).some((a) => a?.objectId)) {
+    releasing.add(tabId);
+    setTimeout(() => {
+      releasing.delete(tabId);
+      if (attached.has(tabId)) chrome.debugger.sendCommand({ tabId }, 'Runtime.releaseObjectGroup', { objectGroup: 'console' }).catch(() => {});
+    }, 1000);
+  }
+}
+
+const CONSOLE_EVENTS = new Set(['Runtime.consoleAPICalled', 'Runtime.exceptionThrown', 'Log.entryAdded']);
+
 chrome.debugger.onEvent.addListener(({ tabId }, method, params) => {
+  if (CONSOLE_EVENTS.has(method)) {
+    recordConsole(tabId, method, params);
+    return;
+  }
   const log = networks.get(tabId);
   if (!log) return;
   const entry = log.requests.get(params.requestId);
@@ -445,10 +526,11 @@ function requestSummary(r) {
 const SECRET_HEADERS = /^(cookie|set-cookie|authorization|proxy-authorization|x-api-key|x-auth-token|x-csrf-token|x-xsrf-token)$/i;
 const redact = (headers = {}) => Object.fromEntries(Object.entries(headers).map(([k, v]) => [k, SECRET_HEADERS.test(k) ? '[redacted]' : v]));
 
-// One answer covers each kind of action on a site, so a run of clicks asks once.
-async function approveAction(tab, host, key, question, detail) {
+// One answer covers each kind of action on a site, so a run of clicks asks once. evenIfAllowed asks
+// despite "any site", for actions that reach beyond the page.
+async function approveAction(tab, host, key, question, detail, evenIfAllowed = false) {
   const { allowAllSites, alwaysAllowedTools } = await settings();
-  if (allowAllSites || alwaysAllowedTools.includes(`${host} ${key}`)) return;
+  if ((allowAllSites && !evenIfAllowed) || alwaysAllowedTools.includes(`${host} ${key}`)) return;
   const choice = await requestApproval({
     kind: 'action', tool: key, question, host, title: tab.title, windowId: tab.windowId, input: detail,
   });
@@ -464,17 +546,29 @@ async function evaluate(tabId, expression) {
   return result.value;
 }
 
-async function screenshot(tabId) {
+async function screenshot(tabId, { region, scale } = {}) {
   const { cssVisualViewport: view } = await cdp(tabId, 'Page.getLayoutMetrics');
+  const area = region ?? { x: 0, y: 0, width: view.clientWidth, height: view.clientHeight };
+  const inView = area.width > 0 && area.height > 0 && area.x >= 0 && area.y >= 0 &&
+    area.x + area.width <= view.clientWidth + 1 && area.y + area.height <= view.clientHeight + 1;
+  if (!inView) throw new Error(`region has to lie within the view, which is ${Math.round(view.clientWidth)} by ${Math.round(view.clientHeight)}`);
+  // A region is asked for to see it closer, so it comes at twice its size unless scale says otherwise.
+  const size = Math.min(Math.max(Number(scale) || (region ? 2 : 1), 0.1), 4);
   // The capture comes at the display's pixel ratio; undoing it puts the image in CSS pixels, so a
   // point in it is a point click takes.
   const ratio = await evaluate(tabId, 'devicePixelRatio');
   const { data } = await cdp(tabId, 'Page.captureScreenshot', {
     format: 'jpeg',
     quality: 80,
-    clip: { x: view.pageX, y: view.pageY, width: view.clientWidth, height: view.clientHeight, scale: 1 / ratio },
+    clip: { x: view.pageX + area.x, y: view.pageY + area.y, width: area.width, height: area.height, scale: size / ratio },
   });
-  return { image: { data, mimeType: 'image/jpeg' }, width: Math.round(view.clientWidth), height: Math.round(view.clientHeight) };
+  return {
+    image: { data, mimeType: 'image/jpeg' },
+    width: Math.round(area.width * size),
+    height: Math.round(area.height * size),
+    ...(size !== 1 && { scale: size }),
+    ...(region && { region }),
+  };
 }
 
 // A background tab gets no input: clicks and keys never reach the page, and a wheel event is
@@ -504,19 +598,45 @@ async function input(tabId, method, params) {
   }
 }
 
-async function clickAt(tabId, x, y) {
-  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
-    await input(tabId, 'Input.dispatchMouseEvent', {
-      type, x, y, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1,
-    });
+const BUTTONS = { left: 1, right: 2, middle: 4 };
+
+// A double click is a second press counting 2, as the page tells it from two single clicks.
+async function clickAt(tabId, x, y, { button = 'left', count = 1, modifiers = 0 } = {}) {
+  await input(tabId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, modifiers });
+  for (let clickCount = 1; clickCount <= count; clickCount++) {
+    await input(tabId, 'Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button, buttons: BUTTONS[button], clickCount, modifiers });
+    await input(tabId, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button, buttons: 0, clickCount, modifiers });
   }
 }
 
-async function center(tabId, selector) {
+// Shy's own context menu is native: input from here can neither reach nor close it, and it would
+// stay open on the user's screen. The page's own menu still opens. Resolves whether the page had one.
+async function withoutBrowserMenu(tabId, click) {
+  const key = JSON.stringify(`__talkToShyMenu${crypto.randomUUID().slice(0, 8)}`);
+  await evaluate(tabId, `(() => {
+    const seen = window[${key}] = { page: null };
+    seen.listener = (e) => { seen.page = e.defaultPrevented; e.preventDefault(); };
+    addEventListener('contextmenu', seen.listener);
+  })()`);
+  let page = null;
+  try {
+    await click();
+  } finally {
+    page = await evaluate(tabId, `(() => {
+      const seen = window[${key}];
+      removeEventListener('contextmenu', seen.listener);
+      delete window[${key}];
+      return seen.page;
+    })()`).catch(() => null);
+  }
+  return page;
+}
+
+async function center(tabId, selector, block = 'center') {
   const point = await evaluate(tabId, `(() => {
     const element = document.querySelector(${JSON.stringify(selector)});
     if (!element) return null;
-    element.scrollIntoView({ block: 'center', inline: 'center' });
+    element.scrollIntoView({ block: ${JSON.stringify(block)}, inline: ${JSON.stringify(block)} });
     const box = element.getBoundingClientRect();
     return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
   })()`);
@@ -526,17 +646,17 @@ async function center(tabId, selector) {
 
 // A ref is the element's backend node id, which the renderer keeps for as long as the element
 // lives, so refs need no state here and survive this worker being stopped.
-async function refPoint(tabId, ref) {
-  const backendNodeId = Number(/^e(\d+)$/.exec(ref ?? '')?.[1]);
-  if (!backendNodeId) throw new Error(`${ref} is not a ref; read_page with format "tree" lists them`);
+async function refPoint(tabId, ref, block = 'center') {
+  const backendNodeId = refNode(ref);
   const gone = new Error(`${ref} is no longer on the page; read the tree again`);
   const { object } = await cdp(tabId, 'DOM.resolveNode', { backendNodeId }).catch(() => { throw gone; });
   const { result } = await cdp(tabId, 'Runtime.callFunctionOn', {
     objectId: object.objectId,
     returnByValue: true,
-    functionDeclaration: `function () {
+    arguments: [{ value: block }],
+    functionDeclaration: `function (block) {
       if (!this.isConnected) return false;
-      (this.nodeType === 1 ? this : this.parentElement).scrollIntoView({ block: 'center', inline: 'center' });
+      (this.nodeType === 1 ? this : this.parentElement).scrollIntoView({ block, inline: block });
       return true;
     }`,
   });
@@ -549,7 +669,151 @@ async function refPoint(tabId, ref) {
   return { x: (q[0] + q[2] + q[4] + q[6]) / 4, y: (q[1] + q[3] + q[5] + q[7]) / 4 };
 }
 
+function refNode(ref) {
+  const backendNodeId = Number(/^e(\d+)$/.exec(ref ?? '')?.[1]);
+  if (!backendNodeId) throw new Error(`${ref} is not a ref; read_page with format "tree" lists them`);
+  return backendNodeId;
+}
+
+async function pointOf(tabId, { ref, selector, x, y } = {}, block = 'center') {
+  if (ref) return refPoint(tabId, ref, block);
+  if (selector) return center(tabId, selector, block);
+  if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
+  throw new Error('Name the place with a ref, a selector or x and y');
+}
+
+const modifierBits = (modifiers = []) => modifiers.reduce((sum, name) => sum | (MODIFIERS[name] ?? 0), 0);
+
+async function dragBetween(tabId, start, end, steps, modifiers) {
+  let dragged = null;
+  const intercepted = (source, method, params) => {
+    if (source.tabId === tabId && method === 'Input.dragIntercepted') dragged = params.data;
+  };
+  chrome.debugger.onEvent.addListener(intercepted);
+  // An HTML drag would otherwise start macOS's own drag loop, which input from here cannot reach;
+  // intercepted, the browser hands its data over to be dropped with drag events.
+  await cdp(tabId, 'Input.setInterceptDrags', { enabled: true });
+  const mouse = (type, { x, y }, buttons) =>
+    input(tabId, 'Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons, clickCount: 1, modifiers });
+  const drag = (type, { x, y }) => input(tabId, 'Input.dispatchDragEvent', { type, x, y, data: dragged, modifiers });
+  try {
+    await mouse('mouseMoved', start, 0);
+    await mouse('mousePressed', start, 1);
+    for (let i = 1; i <= steps; i++) {
+      const at = { x: start.x + ((end.x - start.x) * i) / steps, y: start.y + ((end.y - start.y) * i) / steps };
+      if (dragged) {
+        await drag('dragOver', at);
+        continue;
+      }
+      await mouse('mouseMoved', at, 1);
+      // A frame apart, as a hand moves, for pages that only look at the mouse once per frame.
+      await new Promise((resolve) => setTimeout(resolve, 16));
+      if (dragged) await drag('dragEnter', at);
+    }
+    if (!dragged) {
+      await mouse('mouseReleased', end, 0);
+      return { from: start, to: end };
+    }
+    await drag('dragOver', end);
+    await drag('drop', end);
+    return { from: start, to: end, htmlDrag: true };
+  } finally {
+    chrome.debugger.onEvent.removeListener(intercepted);
+    chrome.debugger.sendCommand({ tabId }, 'Input.setInterceptDrags', { enabled: false }).catch(() => {});
+  }
+}
+
+const OBJECT_GROUP = 'talk-to-shy';
+const UPLOAD_LIMIT = 50 * 1024 * 1024;
+
+async function callOn(tabId, objectId, functionDeclaration, args = [], returnByValue = false) {
+  const { result, exceptionDetails } = await cdp(tabId, 'Runtime.callFunctionOn', {
+    objectId, functionDeclaration, returnByValue, objectGroup: OBJECT_GROUP, arguments: args.map((value) => ({ value })),
+  });
+  if (exceptionDetails) throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text);
+  return result;
+}
+
+// With no target named, the page's only file input.
+async function elementObject(tabId, { ref, selector, x, y }) {
+  if (ref) {
+    const { object } = await cdp(tabId, 'DOM.resolveNode', { backendNodeId: refNode(ref), objectGroup: OBJECT_GROUP })
+      .catch(() => { throw new Error(`${ref} is no longer on the page; read the tree again`); });
+    return object.objectId;
+  }
+  const expression = selector ? `document.querySelector(${JSON.stringify(selector)})`
+    : Number.isFinite(x) && Number.isFinite(y) ? `document.elementFromPoint(${x}, ${y})`
+      : `(() => { const inputs = document.querySelectorAll('input[type=file]'); return inputs.length === 1 ? inputs[0] : inputs.length; })()`;
+  const { result } = await cdp(tabId, 'Runtime.evaluate', { expression, objectGroup: OBJECT_GROUP });
+  if (result.objectId) return result.objectId;
+  if (result.type === 'number') throw new Error(`The page has ${result.value} file inputs; name one, or the element to drop files on, with a ref, a selector or a point`);
+  throw new Error(selector ? `Nothing on the page matches ${selector}` : `Nothing is at ${x}, ${y}`);
+}
+
+// Sites hide the input behind a styled button or drop zone, and the tree leaves hidden elements out,
+// so the nearest one around the target counts.
+const FIND_FILE_INPUT = `function () {
+  const isFile = (e) => e instanceof HTMLInputElement && e.type === 'file';
+  if (isFile(this)) return this;
+  if (isFile(this.control)) return this.control;
+  for (let e = this.nodeType === 1 ? this : this.parentElement; e && e !== document.body; e = e.parentElement) {
+    const inputs = e.querySelectorAll('input[type=file]');
+    if (inputs.length) return inputs.length === 1 ? inputs[0] : null;
+  }
+  return null;
+}`;
+
+const PUT_FILES = `function (files, asDrop) {
+  const transfer = new DataTransfer();
+  for (const f of files) transfer.items.add(new File([Uint8Array.fromBase64(f.base64)], f.name, { type: f.mimeType }));
+  if (!asDrop) {
+    this.files = transfer.files;
+    this.dispatchEvent(new Event('input', { bubbles: true }));
+    this.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }
+  const box = this.getBoundingClientRect();
+  const init = { bubbles: true, cancelable: true, composed: true, dataTransfer: transfer, clientX: box.left + box.width / 2, clientY: box.top + box.height / 2 };
+  this.dispatchEvent(new DragEvent('dragenter', init));
+  this.dispatchEvent(new DragEvent('dragover', init));
+  const drop = new DragEvent('drop', init);
+  this.dispatchEvent(drop);
+  // A drop zone cancels the drop, or the browser would open the file instead.
+  return drop.defaultPrevented;
+}`;
+
+async function fileContents(files) {
+  let total = 0;
+  const contents = [];
+  for (const f of files) {
+    let bytes;
+    let { name, mimeType } = f;
+    if (f.text !== undefined) {
+      bytes = new TextEncoder().encode(f.text);
+      name ??= 'file.txt';
+      mimeType ??= 'text/plain';
+    } else if (f.base64 !== undefined) {
+      bytes = Uint8Array.fromBase64(f.base64);
+    } else if (f.url) {
+      // Without the user's cookies, so a URL brings in only what anyone could download.
+      const response = await fetch(f.url, { credentials: 'omit' });
+      if (!response.ok) throw new Error(`${f.url} answered ${response.status}`);
+      bytes = new Uint8Array(await response.arrayBuffer());
+      name ??= decodeURIComponent(new URL(response.url).pathname.split('/').pop()) || undefined;
+      mimeType ??= response.headers.get('content-type')?.split(';')[0];
+    } else {
+      throw new Error('Each file needs a path, url, text or base64');
+    }
+    total += bytes.length;
+    if (total > UPLOAD_LIMIT) throw new Error(`Uploads are limited to ${UPLOAD_LIMIT / 1024 / 1024} MB in all`);
+    contents.push({ name: name ?? 'file', mimeType: mimeType ?? '', base64: bytes.toBase64() });
+  }
+  return contents;
+}
+
 const TREE_LIMIT = 30000;
+const TEXT_LIMIT = 50000;
+const READ_LIMIT = 200000;
 const ACTIONABLE_ROLES = new Set([
   'button', 'link', 'textbox', 'searchbox', 'combobox', 'checkbox', 'radio', 'switch', 'slider', 'spinbutton',
   'tab', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'treeitem', 'listbox', 'PopUpButton',
@@ -563,7 +827,7 @@ const SKIPPED_ROLES = new Set(['InlineTextBox', 'LineBreak']);
 const STATES = ['checked', 'pressed', 'expanded'];
 const FLAGS = ['selected', 'disabled', 'required', 'focused'];
 
-function formatTree(nodes, interactive) {
+function formatTree(nodes, interactive, root, limit) {
   const byId = new Map(nodes.map((node) => [node.nodeId, node]));
   const lines = [];
   let size = 0;
@@ -588,7 +852,7 @@ function formatTree(nodes, interactive) {
       if (props.level !== undefined) line += ` level=${props.level}`;
       if (props.url) line += ` url=${clip(String(props.url), 120)}`;
       line = `${'  '.repeat(depth)}- ${line}`;
-      if (size + line.length > TREE_LIMIT) {
+      if (size + line.length > limit) {
         cut = true;
         return;
       }
@@ -599,19 +863,19 @@ function formatTree(nodes, interactive) {
       walk(byId.get(childId), shown ? depth + 1 : depth, shown && name ? name : around);
     }
   };
-  walk(nodes.find((node) => !node.parentId), 0, '');
+  walk(root, 0, '');
   return { tree: lines.join('\n'), cut };
 }
 
-async function pageTree(tabId, interactive) {
+async function pageTree(tabId, interactive, ref, limit) {
   const { nodes } = await cdp(tabId, 'Accessibility.getFullAXTree');
   // Reading the tree may leave accessibility on, which makes every later change to the page cost more.
   cdp(tabId, 'Accessibility.disable').catch(() => {});
-  const { tree, cut } = formatTree(nodes, interactive);
-  return {
-    tree,
-    ...(cut && { note: `The tree was cut at ${TREE_LIMIT.toLocaleString('en')} characters.${interactive ? '' : ' interactive: true lists only what can be clicked or typed into.'}` }),
-  };
+  const root = ref ? nodes.find((node) => node.backendDOMNodeId === refNode(ref)) : nodes.find((node) => !node.parentId);
+  if (!root) throw new Error(`${ref} is not in the tree: it is hidden or gone; read the whole tree again`);
+  const { tree, cut } = formatTree(nodes, interactive, root, limit);
+  const hint = interactive ? ' Pass a larger maxChars, or a ref to read one part.' : ' interactive: true lists only what can be clicked or typed into; a ref reads one part.';
+  return { tree, ...(cut && { note: `The tree was cut at ${limit.toLocaleString('en')} characters.${hint}` }) };
 }
 
 const KEY_CODES = {
@@ -619,27 +883,107 @@ const KEY_CODES = {
   ArrowDown: 40, Home: 36, End: 35, PageUp: 33, PageDown: 34, ' ': 32,
 };
 const MODIFIERS = { Alt: 1, Control: 2, Meta: 4, Shift: 8 };
+const MODIFIER_NAMES = { cmd: 'Meta', command: 'Meta', meta: 'Meta', ctrl: 'Control', control: 'Control', alt: 'Alt', option: 'Alt', opt: 'Alt', shift: 'Shift' };
+const KEY_NAMES = Object.fromEntries([...Object.keys(KEY_CODES).map((name) => [name.toLowerCase(), name]), ['return', 'Enter'], ['esc', 'Escape'], ['space', ' ']]);
+// On a Mac the editing these shortcuts do comes from the window, which input sent here bypasses.
+const MAC_COMMANDS = { a: 'selectAll', c: 'copy', x: 'cut', v: 'paste', z: 'undo', 'shift+z': 'redo' };
+
+// Takes "cmd+shift+z" as well as a key with a list of modifiers.
+function parseKey(key, modifiers = []) {
+  const combo = /^((?:(?:cmd|command|meta|ctrl|control|alt|option|opt|shift)\+)+)(.+)$/i.exec(key);
+  const held = combo ? combo[1].split('+').filter(Boolean).map((name) => MODIFIER_NAMES[name.toLowerCase()]) : [];
+  const base = combo ? combo[2] : key;
+  return { key: KEY_NAMES[base.toLowerCase()] ?? base, modifiers: [...new Set([...modifiers, ...held])] };
+}
+
+function keyCode(key) {
+  if (/^[a-z]$/i.test(key)) return `Key${key.toUpperCase()}`;
+  if (/^\d$/.test(key)) return `Digit${key}`;
+  if (key === ' ') return 'Space';
+  return KEY_CODES[key] ? key : '';
+}
 
 async function pressKey(tabId, key, modifiers = []) {
-  const bits = modifiers.reduce((sum, name) => sum | (MODIFIERS[name] ?? 0), 0);
+  const bits = modifierBits(modifiers);
   const single = [...key].length === 1;
   // With Control or Meta held, a letter is a shortcut rather than text.
   const text = key === 'Enter' ? '\r' : single && !(bits & (MODIFIERS.Control | MODIFIERS.Meta)) ? key : undefined;
-  const event = { key, windowsVirtualKeyCode: KEY_CODES[key] ?? (single ? key.toUpperCase().charCodeAt(0) : 0), modifiers: bits };
-  await input(tabId, 'Input.dispatchKeyEvent', { ...event, type: text ? 'keyDown' : 'rawKeyDown', ...(text && { text }) });
+  const command = bits === MODIFIERS.Meta ? MAC_COMMANDS[key.toLowerCase()]
+    : bits === (MODIFIERS.Meta | MODIFIERS.Shift) ? MAC_COMMANDS[`shift+${key.toLowerCase()}`] : undefined;
+  const event = { key, code: keyCode(key), windowsVirtualKeyCode: KEY_CODES[key] ?? (single ? key.toUpperCase().charCodeAt(0) : 0), modifiers: bits };
+  await input(tabId, 'Input.dispatchKeyEvent', { ...event, type: text ? 'keyDown' : 'rawKeyDown', ...(text && { text }), ...(command && { commands: [command] }) });
   await input(tabId, 'Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
 }
 
-async function loadNewDocument(tabId, method, params) {
+// A new document has a new time origin; until then readyState still describes the old one. A move
+// within one document keeps its time origin, so reaching url counts too.
+async function loadNewDocument(tabId, method, params, url) {
   const before = await evaluate(tabId, 'performance.timeOrigin').catch(() => 0);
   await cdp(tabId, method, params);
-  // A new document has a new time origin; until then readyState still describes the old one.
   for (let i = 0; i < 60; i++) {
     await new Promise((resolve) => setTimeout(resolve, 250));
-    const now = await evaluate(tabId, '[performance.timeOrigin, document.readyState]').catch(() => null);
-    if (now && now[0] !== before && now[1] === 'complete') break;
+    const now = await evaluate(tabId, '[performance.timeOrigin, document.readyState, location.href]').catch(() => null);
+    if (now && (now[0] !== before || now[2] === url) && now[1] === 'complete') break;
   }
 }
+
+async function goThroughHistory(tabId, step) {
+  const { currentIndex, entries } = await cdp(tabId, 'Page.getNavigationHistory');
+  const entry = entries[currentIndex + step];
+  if (!entry) throw new Error(`There is no page to go ${step < 0 ? 'back' : 'forward'} to`);
+  await loadNewDocument(tabId, 'Page.navigateToHistoryEntry', { entryId: entry.id }, entry.url);
+  return evaluate(tabId, '({ url: location.href, title: document.title })');
+}
+
+// Through the prototype's setter, which frameworks such as React watch, then the events a person's
+// edit fires.
+const SET_VALUE = `function (value) {
+  let el = this.nodeType === 1 ? this : this.parentElement;
+  if (el instanceof HTMLLabelElement && el.control) el = el.control;
+  if (el instanceof HTMLOptionElement && el.closest('select')) {
+    value = el.value;
+    el = el.closest('select');
+  }
+  if (el.disabled) return { error: 'It is disabled' };
+  const fire = () => {
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  if (el instanceof HTMLSelectElement) {
+    const options = [...el.options];
+    const wanted = (Array.isArray(value) ? value : [value]).map(String);
+    const chosen = wanted.map((w) => options.find((o) => o.value === w) ?? options.find((o) => o.text.trim() === w.trim()));
+    const missing = wanted.filter((_, i) => !chosen[i]);
+    if (missing.length) return { error: 'No option ' + missing.join(', ') + '; the options are ' + options.map((o) => o.text.trim()).slice(0, 50).join(', ') };
+    if (chosen.length > 1 && !el.multiple) return { error: 'This select takes one option' };
+    for (const o of options) o.selected = chosen.includes(o);
+    fire();
+    return { selected: chosen.map((o) => o.text.trim()) };
+  }
+  if (el instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio')) {
+    const on = value === true || value === 'true' || value === 'on';
+    if (!on && el.type === 'radio') return { error: 'A radio button is unchecked by choosing another one' };
+    // click() toggles it and fires click, input and change, as a person's click does.
+    if (el.checked !== on) el.click();
+    if (el.checked !== on) return { error: 'The page kept it ' + (el.checked ? 'checked' : 'unchecked') };
+    return { checked: el.checked };
+  }
+  if (el instanceof HTMLInputElement && el.type === 'file') return { error: 'Use upload_file for a file input' };
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+    el.focus();
+    const kind = el instanceof HTMLInputElement ? HTMLInputElement : HTMLTextAreaElement;
+    Object.getOwnPropertyDescriptor(kind.prototype, 'value').set.call(el, String(value));
+    fire();
+    return { value: el.value };
+  }
+  if (el.isContentEditable) {
+    el.focus();
+    getSelection().selectAllChildren(el);
+    document.execCommand('insertText', false, String(value));
+    return { text: el.innerText.slice(0, 200) };
+  }
+  return { error: el.tagName.toLowerCase() + ' is not a form control; open it with click, then click the option or use press_key' };
+}`;
 
 async function navigate(tabId, url) {
   await loadNewDocument(tabId, 'Page.navigate', { url });
@@ -655,10 +999,18 @@ const TOOLS = {
       .filter((t) => !t.incognito && (!needle || `${t.title} ${t.url}`.toLowerCase().includes(needle)))
       .map(({ id, windowId, title, url }) => ({ id, windowId, title, url, active: id === current?.id }));
   },
-  async read_page({ tabId, format = 'text', interactive = false }) {
+  async read_page({ tabId, format = 'text', interactive = false, ref, maxChars }) {
     const { tab, host } = await targetTab(tabId, 'read_page');
-    if (format !== 'tree') return { host, ...(await inPage(tab.id, readPage, [50000])) };
-    return { host, title: tab.title, url: tab.url, ...(await pageTree(tab.id, interactive)) };
+    const limit = Math.min(Math.max(Math.round(maxChars) || 0, 0), READ_LIMIT) || undefined;
+    if (format === 'tree') return { host, title: tab.title, url: tab.url, ...(await pageTree(tab.id, interactive, ref, limit ?? TREE_LIMIT)) };
+    if (!ref) return { host, ...(await inPage(tab.id, readPage, [limit ?? TEXT_LIMIT])) };
+    try {
+      const element = await elementObject(tab.id, { ref });
+      const read = 'function (limit) { return (this.innerText ?? this.textContent).slice(0, limit); }';
+      return { host, title: tab.title, url: tab.url, text: (await callOn(tab.id, element, read, [limit ?? TEXT_LIMIT], true)).value };
+    } finally {
+      cdp(tab.id, 'Runtime.releaseObjectGroup', { objectGroup: OBJECT_GROUP }).catch(() => {});
+    }
   },
   async list_webmcp_tools({ tabId }) {
     const { tab, host } = await targetTab(tabId, 'list_webmcp_tools');
@@ -680,9 +1032,9 @@ const TOOLS = {
     }
     return { host, ...(await inPage(tab.id, runPageTool, [name, input ?? {}])) };
   },
-  async screenshot({ tabId }) {
+  async screenshot({ tabId, region, scale }) {
     const { tab, host } = await targetTab(tabId, 'screenshot');
-    return { host, ...(await screenshot(tab.id)) };
+    return { host, ...(await screenshot(tab.id, { region, scale })) };
   },
   async run_script({ tabId, code }) {
     const { tab, host } = await targetTab(tabId, 'run_script');
@@ -697,14 +1049,115 @@ const TOOLS = {
     }
     return { host, result: result ?? null };
   },
-  async click({ tabId, x, y, selector, ref }) {
+  async click({ tabId, x, y, selector, ref, button = 'left', clickCount = 1, modifiers }) {
+    if (!Object.hasOwn(BUTTONS, button)) throw new Error('button is left, right or middle');
+    const count = Math.min(Math.max(Math.round(clickCount) || 1, 1), 3);
     const { tab, host } = await targetTab(tabId, 'click');
     await inFront(tab.id, 'click');
     const target = ref ?? selector;
-    await approveAction(tab, host, 'control', `Let your agent use ${host}?`, target ? `Click ${target}` : `Click at ${x}, ${y}`);
-    const point = ref ? await refPoint(tab.id, ref) : selector ? await center(tab.id, selector) : { x, y };
-    await clickAt(tab.id, point.x, point.y);
-    return { host, clicked: point };
+    const verb = button === 'right' ? 'Right-click' : ['Click', 'Double-click', 'Triple-click'][count - 1];
+    await approveAction(tab, host, 'control', `Let your agent use ${host}?`, target ? `${verb} ${target}` : `${verb} at ${x}, ${y}`);
+    const point = await pointOf(tab.id, { ref, selector, x, y });
+    const bits = modifierBits(modifiers);
+    const press = () => clickAt(tab.id, point.x, point.y, { button, count, modifiers: bits });
+    // On a Mac, a click with Control held is a right click.
+    if (button !== 'right' && !(bits & MODIFIERS.Control)) {
+      await press();
+      return { host, clicked: point };
+    }
+    return { host, clicked: point, pageMenu: await withoutBrowserMenu(tab.id, press) };
+  },
+  async hover({ tabId, x, y, selector, ref }) {
+    const { tab, host } = await targetTab(tabId, 'hover');
+    await inFront(tab.id, 'hover');
+    await approveAction(tab, host, 'control', `Let your agent use ${host}?`, `Point at ${ref ?? selector ?? `${x}, ${y}`}`);
+    const point = await pointOf(tab.id, { ref, selector, x, y });
+    await input(tab.id, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y });
+    return { host, hovered: point };
+  },
+  async set_value({ tabId, ref, selector, value }) {
+    if (!ref && !selector) throw new Error('set_value needs a ref or a selector');
+    if (value === undefined) throw new Error('set_value needs a value');
+    const { tab, host } = await targetTab(tabId, 'set_value');
+    await approveAction(tab, host, 'control', `Let your agent use ${host}?`, `Set ${ref ?? selector} to ${JSON.stringify(value)}`);
+    try {
+      const element = await elementObject(tab.id, { ref, selector });
+      const result = (await callOn(tab.id, element, SET_VALUE, [value], true)).value;
+      if (result.error) throw new Error(result.error);
+      return { host, ...result };
+    } finally {
+      cdp(tab.id, 'Runtime.releaseObjectGroup', { objectGroup: OBJECT_GROUP }).catch(() => {});
+    }
+  },
+  // The size asked for is the page's; the window adds the toolbar and any side panel around it.
+  async resize_window({ tabId, width, height }) {
+    const { tab, host } = await targetTab(tabId, 'resize_window');
+    if (!(width >= 200 && height >= 200)) throw new Error('width and height have to be at least 200');
+    await approveAction(tab, host, 'control', `Let your agent use ${host}?`, `Resize the window so the page is ${width} by ${height}`);
+    if ((await chrome.windows.get(tab.windowId)).state !== 'normal') {
+      await chrome.windows.update(tab.windowId, { state: 'normal' });
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    // A second pass corrects for a toolbar or panel that changed size along with the window.
+    for (let i = 0; i < 2; i++) {
+      const win = await chrome.windows.get(tab.windowId);
+      const [w, h] = await evaluate(tab.id, '[innerWidth, innerHeight]');
+      if (w === width && h === height) break;
+      await chrome.windows.update(tab.windowId, { width: win.width + Math.round(width - w), height: win.height + Math.round(height - h) });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    const [w, h] = await evaluate(tab.id, '[innerWidth, innerHeight]');
+    const win = await chrome.windows.get(tab.windowId);
+    return {
+      host,
+      page: { width: w, height: h },
+      window: { width: win.width, height: win.height },
+      ...((w !== width || h !== height) && { note: 'The window could not reach that size; the screen or its smallest size limits it' }),
+    };
+  },
+  async drag({ tabId, from, to, steps = 12, modifiers }) {
+    const { tab, host } = await targetTab(tabId, 'drag');
+    await inFront(tab.id, 'drag');
+    const name = (place) => place?.ref ?? place?.selector ?? `${place?.x}, ${place?.y}`;
+    await approveAction(tab, host, 'control', `Let your agent use ${host}?`, `Drag from ${name(from)} to ${name(to)}`);
+    // Scrolling only when needed keeps the first place in view while the second is found.
+    const start = await pointOf(tab.id, from, 'nearest');
+    const end = await pointOf(tab.id, to, 'nearest');
+    const moves = Math.min(Math.max(Math.round(steps) || 1, 1), 100);
+    return { host, ...(await dragBetween(tab.id, start, end, moves, modifierBits(modifiers))) };
+  },
+  async upload_file({ tabId, ref, selector, x, y, files }) {
+    const { tab, host } = await targetTab(tabId, 'upload_file');
+    if (!Array.isArray(files) || !files.length) throw new Error('upload_file needs a list of files');
+    const paths = files.filter((f) => f.path).map((f) => f.path);
+    if (paths.length && paths.length < files.length) throw new Error('Pass either paths or contents (url, text, base64), not both');
+    const names = paths.length ? paths : files.map((f) => f.name ?? f.url ?? 'a file');
+    // A path can be any file on this Mac, and the page can send it anywhere.
+    if (paths.length) {
+      await approveAction(tab, host, 'upload_file', `Let your agent upload files from this Mac to ${host}?`, paths.join('\n'), true);
+    } else {
+      await approveAction(tab, host, 'control', `Let your agent use ${host}?`, `Upload ${names.join(', ')}`);
+    }
+    const contents = paths.length ? null : await fileContents(files);
+    try {
+      const target = await elementObject(tab.id, { ref, selector, x, y });
+      const fileInput = (await callOn(tab.id, target, FIND_FILE_INPUT)).objectId;
+      if (fileInput) {
+        if (files.length > 1 && !(await callOn(tab.id, fileInput, 'function () { return this.multiple; }', [], true)).value) {
+          throw new Error('This file input takes one file');
+        }
+        if (paths.length) await cdp(tab.id, 'DOM.setFileInputFiles', { files: paths, objectId: fileInput });
+        else await callOn(tab.id, fileInput, PUT_FILES, [contents, false]);
+        return { host, uploaded: names, into: 'file input' };
+      }
+      if (paths.length) throw new Error('A path goes into a file input, and there is none here; to drop a file on this element, pass its content (url or base64) instead');
+      if (!(await callOn(tab.id, target, PUT_FILES, [contents, true], true)).value) {
+        throw new Error('Nothing took the drop: name a file input, or an element that takes dropped files');
+      }
+      return { host, uploaded: names, into: 'drop' };
+    } finally {
+      cdp(tab.id, 'Runtime.releaseObjectGroup', { objectGroup: OBJECT_GROUP }).catch(() => {});
+    }
   },
   async type_text({ tabId, text, selector, ref }) {
     const { tab, host } = await targetTab(tabId, 'type_text');
@@ -718,12 +1171,16 @@ const TOOLS = {
     await input(tab.id, 'Input.insertText', { text });
     return { host, typed: text.length };
   },
-  async press_key({ tabId, key, modifiers }) {
+  async press_key({ tabId, key, modifiers, repeat = 1 }) {
+    const parsed = parseKey(String(key ?? ''), modifiers);
+    if (!parsed.key) throw new Error('press_key needs a key');
+    const times = Math.min(Math.max(Math.round(repeat) || 1, 1), 100);
     const { tab, host } = await targetTab(tabId, 'press_key');
     await inFront(tab.id, 'press_key');
-    await approveAction(tab, host, 'control', `Let your agent use ${host}?`, `Press ${[...(modifiers ?? []), key].join('+')}`);
-    await pressKey(tab.id, key, modifiers);
-    return { host, pressed: key };
+    const name = [...parsed.modifiers, parsed.key === ' ' ? 'Space' : parsed.key].join('+');
+    await approveAction(tab, host, 'control', `Let your agent use ${host}?`, `Press ${name}${times > 1 ? ` ${times} times` : ''}`);
+    for (let i = 0; i < times; i++) await pressKey(tab.id, parsed.key, parsed.modifiers);
+    return { host, pressed: name, ...(times > 1 && { times }) };
   },
   async scroll({ tabId, x, y, ref, deltaX = 0, deltaY = 0 }) {
     const { tab, host } = await targetTab(tabId, 'scroll');
@@ -737,8 +1194,9 @@ const TOOLS = {
   },
   async navigate({ tabId, url }) {
     const { tab, host } = await targetTab(tabId, 'navigate');
-    await approveAction(tab, host, 'control', `Let your agent use ${host}?`, `Open ${url}`);
-    return { host, ...(await navigate(tab.id, url)) };
+    const step = { back: -1, forward: 1 }[url];
+    await approveAction(tab, host, 'control', `Let your agent use ${host}?`, step ? `Go ${url}` : `Open ${url}`);
+    return { host, ...(await (step ? goThroughHistory(tab.id, step) : navigate(tab.id, url))) };
   },
   // In the background by default, so the agent works without taking over the page the user is on.
   async open_tab({ url, active = false }) {
@@ -788,6 +1246,30 @@ const TOOLS = {
       ...(started && { note: 'Recording started just now, so earlier requests were not seen. Pass reload: true to record the page loading.' }),
       total: log.requests.size,
       requests: list.slice(-limit).map(requestSummary),
+    };
+  },
+  async console_messages({ tabId, reload, errorsOnly, pattern, limit = 100 }) {
+    const { tab, host } = await targetTab(tabId, 'console_messages');
+    await attach(tab.id);
+    if (reload) {
+      await approveAction(tab, host, 'control', `Let your agent use ${host}?`, 'Reload the page');
+      consoles.set(tab.id, { since: Date.now(), messages: [] });
+      await loadNewDocument(tab.id, 'Page.reload', { ignoreCache: true });
+      // Messages the page logs once loaded would otherwise be missing.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    const log = consoles.get(tab.id);
+    let list = log.messages;
+    if (errorsOnly) list = list.filter((m) => m.level === 'error');
+    if (pattern) {
+      const match = new RegExp(pattern, 'i');
+      list = list.filter((m) => match.test(m.text) || match.test(m.source ?? ''));
+    }
+    return {
+      host,
+      recordingSince: new Date(log.since).toISOString(),
+      total: log.messages.length,
+      messages: list.slice(-limit).map(({ at, ...m }) => ({ time: new Date(at).toISOString(), ...m })),
     };
   },
   async network_request({ tabId, requestId, body }) {

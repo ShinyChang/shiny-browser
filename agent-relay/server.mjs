@@ -30,6 +30,11 @@ const PLATFORM = process.env.GATEWAY_PLATFORM ?? 'shy';
 const OUTBOX_SIZE = 100;
 
 const tabId = { type: 'integer', description: 'A tab id from list_tabs. Leave it out to use the tab the user is looking at.' };
+const place = {
+  type: 'object',
+  description: 'A ref from read_page\'s tree, a CSS selector, or a point in CSS pixels.',
+  properties: { ref: { type: 'string' }, selector: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' } },
+};
 const TOOLS = [
   {
     name: 'list_tabs',
@@ -38,13 +43,15 @@ const TOOLS = [
   },
   {
     name: 'read_page',
-    description: 'Returns the title, URL and visible text of a tab, or with format "tree" its accessibility tree: one line per element with its role, name, state and a ref (such as e123) that click, type_text and scroll take. A ref lasts as long as its element; after the page changes, read the tree again. What is inside frames is not included. On a site the user has not allowed yet, it waits until they allow it in Shy.',
+    description: 'Returns the title, URL and visible text of a tab, or with format "tree" its accessibility tree: one line per element with its role, name, state and a ref (such as e123) that click, type_text, scroll, drag and upload_file take. A ref lasts as long as its element; after the page changes, read the tree again. What is inside frames is not included. On a site the user has not allowed yet, it waits until they allow it in Shy.',
     inputSchema: {
       type: 'object',
       properties: {
         tabId,
         format: { type: 'string', enum: ['text', 'tree'], description: 'text (the default) or tree.' },
         interactive: { type: 'boolean', description: 'With format "tree", list only what can be clicked or typed into.' },
+        ref: { type: 'string', description: 'Read only this element and what is inside it.' },
+        maxChars: { type: 'integer', description: 'Where to cut the result: 30,000 characters for a tree and 50,000 for text by default, at most 200,000.' },
       },
     },
   },
@@ -68,8 +75,20 @@ const TOOLS = [
   },
   {
     name: 'screenshot',
-    description: 'Returns an image of what a tab shows right now (its visible area, in CSS pixels, so a point in the image is a point click takes).',
-    inputSchema: { type: 'object', properties: { tabId } },
+    description: 'Returns an image of what a tab shows right now: its visible area in CSS pixels, so a point in the image is a point click takes. region zooms in on part of it, at twice its size unless scale says otherwise; scale below 1 makes a smaller image that costs less to read. With either, a point in the image is at (x / scale + region.x, y / scale + region.y) for click.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId,
+        region: {
+          type: 'object',
+          description: 'Part of the visible area, in CSS pixels.',
+          properties: { x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' } },
+          required: ['x', 'y', 'width', 'height'],
+        },
+        scale: { type: 'number', description: 'From 0.1 to 4: 1 by default, 2 with a region.' },
+      },
+    },
   },
   {
     name: 'run_script',
@@ -82,7 +101,7 @@ const TOOLS = [
   },
   {
     name: 'click',
-    description: 'Clicks with real mouse events, at the middle of an element (a ref from read_page\'s tree, or the first match of a CSS selector), scrolled into view, or at a point (CSS pixels, as in screenshot). Prefer a ref or a selector: they survive scrolling and layout changes.',
+    description: 'Clicks with real mouse events, at the middle of an element (a ref from read_page\'s tree, or the first match of a CSS selector), scrolled into view, or at a point (CSS pixels, as in screenshot). Prefer a ref or a selector: they survive scrolling and layout changes. clickCount 2 or 3 double- or triple-clicks; modifiers are held, so Meta opens a link in a new tab. A right click opens the page\'s own context menu if it has one (pageMenu says so); Shy\'s menu stays closed, since it could not be used from here.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -91,7 +110,32 @@ const TOOLS = [
         selector: { type: 'string', description: 'Clicks this element instead of a point.' },
         x: { type: 'number' },
         y: { type: 'number' },
+        button: { type: 'string', enum: ['left', 'right', 'middle'], description: 'left by default.' },
+        clickCount: { type: 'integer', description: '1 (the default), 2 or 3.' },
+        modifiers: { type: 'array', items: { type: 'string', enum: ['Alt', 'Control', 'Meta', 'Shift'] } },
       },
+    },
+  },
+  {
+    name: 'hover',
+    description: 'Moves the mouse over an element (a ref or a CSS selector) or a point without clicking, to open a menu or a tooltip that shows on hover. The mouse stays there until the next click, hover or drag.',
+    inputSchema: {
+      type: 'object',
+      properties: { tabId, ref: { type: 'string' }, selector: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' } },
+    },
+  },
+  {
+    name: 'set_value',
+    description: "Sets a form control (a ref or a CSS selector) to a value and fires the events a person's edit would: chooses a select's option by its value or its text (a list for a multiple select), checks a checkbox or radio button with true or unchecks a checkbox with false, or replaces the text of an input, textarea or editable element. Use it for a native select, whose menu clicks cannot reach. A custom dropdown is not a form control: open it with click and choose with click.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId,
+        ref: { type: 'string' },
+        selector: { type: 'string' },
+        value: { description: 'Text, a number, true or false, or a list of options.' },
+      },
+      required: ['value'],
     },
   },
   {
@@ -105,13 +149,14 @@ const TOOLS = [
   },
   {
     name: 'press_key',
-    description: 'Presses one key, such as Enter, Escape, Tab, Backspace, ArrowDown or a character, with optional modifiers.',
+    description: 'Presses a key, such as Enter, Escape, Tab, Backspace, ArrowDown or a character, with modifiers given as a list or in the key itself ("cmd+a", "cmd+shift+z", "ctrl+enter"), repeat times. On a Mac, Meta with a, c, x, v and z selects all, copies, cuts, pastes and undoes as in a text field.',
     inputSchema: {
       type: 'object',
       properties: {
         tabId,
         key: { type: 'string' },
         modifiers: { type: 'array', items: { type: 'string', enum: ['Alt', 'Control', 'Meta', 'Shift'] } },
+        repeat: { type: 'integer', description: 'How many times to press it, 1 by default, at most 100.' },
       },
       required: ['key'],
     },
@@ -125,9 +170,62 @@ const TOOLS = [
     },
   },
   {
+    name: 'drag',
+    description: 'Drags with real mouse events from one place to another, holding any modifiers throughout. Works both for HTML drag and drop (draggable items, sortable lists, moving something into a drop area) and for pages that follow the mouse themselves (sliders, canvases, resize handles).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId,
+        from: place,
+        to: place,
+        steps: { type: 'integer', description: 'How many moves the drag takes, 12 by default.' },
+        modifiers: { type: 'array', items: { type: 'string', enum: ['Alt', 'Control', 'Meta', 'Shift'] } },
+      },
+      required: ['from', 'to'],
+    },
+  },
+  {
+    name: 'upload_file',
+    description: "Puts files into a file input, or drops them on an element that takes dropped files. Name the input, or the button, label or drop zone around a hidden one, with a ref, a CSS selector or a point; with none, the page's only file input is used. Each file is either a path on the Mac Shy runs on, or content: a URL (fetched without the user's cookies), text or base64, with an optional name and mimeType. Paths and content cannot be mixed in one call, and a path cannot be dropped, only put into a file input. Uploading a path always waits until the user allows it in Shy, since it can be any file on their Mac.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId,
+        ref: { type: 'string' },
+        selector: { type: 'string' },
+        x: { type: 'number' },
+        y: { type: 'number' },
+        files: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              path: { type: 'string', description: 'An absolute path on the Mac Shy runs on.' },
+              url: { type: 'string' },
+              text: { type: 'string' },
+              base64: { type: 'string' },
+              name: { type: 'string', description: 'The file name the page sees; taken from the path or URL if left out.' },
+              mimeType: { type: 'string' },
+            },
+          },
+        },
+      },
+      required: ['files'],
+    },
+  },
+  {
     name: 'navigate',
-    description: 'Opens a URL in the tab and waits for the page to load.',
-    inputSchema: { type: 'object', properties: { tabId, url: { type: 'string' } }, required: ['url'] },
+    description: 'Opens a URL in the tab, or with "back" or "forward" moves through its history, and waits for the page to load.',
+    inputSchema: { type: 'object', properties: { tabId, url: { type: 'string', description: 'A URL, "back" or "forward".' } }, required: ['url'] },
+  },
+  {
+    name: 'resize_window',
+    description: "Resizes the user's window so the page in the tab is this many CSS pixels wide and high, to see a site at another size. The window stays at that size.",
+    inputSchema: {
+      type: 'object',
+      properties: { tabId, width: { type: 'integer' }, height: { type: 'integer' } },
+      required: ['width', 'height'],
+    },
   },
   {
     name: 'open_tab',
@@ -164,6 +262,20 @@ const TOOLS = [
         body: { type: 'boolean', description: 'Also return the response body.' },
       },
       required: ['requestId'],
+    },
+  },
+  {
+    name: 'console_messages',
+    description: "Lists a tab's console messages, oldest first: console calls, uncaught errors and rejected promises, and the browser's own messages (failed loads, CSP, deprecations), each with its time, level, text and source. Recording starts the first time any tool that drives or captures the tab touches it, and then also picks up what the page logged since it loaded; reload: true clears the list and reloads the page to record its whole load.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId,
+        reload: { type: 'boolean', description: 'Clear the list and reload the page first.' },
+        errorsOnly: { type: 'boolean', description: 'Only errors.' },
+        pattern: { type: 'string', description: 'Only messages whose text or source matches this regular expression, ignoring case.' },
+        limit: { type: 'integer', description: 'How many of the newest to return. Defaults to 100.' },
+      },
     },
   },
   {
