@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shiny <owner@shinychang.net>
+Date: Wed, 28 Oct 2026 15:47:42 +0800
+Subject: [PATCH] fix: name Shy in the update toast and show its mark in the
+ menu bar
+
+- The toast after an update within a milestone said "Chrome was updated".
+- The menu bar search item drew a generic magnifier in black; it now
+  shows Shy's mark as a template image, which follows the menu bar.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
+---
+ chrome/app/generated_resources.grd                           | 2 +-
+ .../omnibox_everywhere_background_mode_manager.cc            | 5 +++++
+ .../ui/omnibox/omnibox_everywhere/omnibox_everywhere_icon.cc | 3 ++-
+ 3 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/chrome/app/generated_resources.grd b/chrome/app/generated_resources.grd
+index 3572385c4d..788a0790e8 100644
+--- a/chrome/app/generated_resources.grd
++++ b/chrome/app/generated_resources.grd
+@@ -19570,7 +19570,7 @@ Please help our engineers fix this problem. Tell us what happened right before y
+         Close
+       </message>
+       <message name="IDS_NON_MILESTONE_UPDATE_TOAST_BODY" desc="Text on a toast notification that is shown when a non milestone update is complete.">
+-        Chrome was updated
++        Shy was updated
+       </message>
+       <message name="IDS_GLIC_SHARE_IMAGE_FAILED_TOAST_BODY" desc="Text on a toast notification that is shown when sharing an image with Gemini fails (when using the 'Create image with Gemini' context menu item)">
+         Could not share image with Gemini. Try again or try another image.
+diff --git a/chrome/browser/background/omnibox_everywhere/omnibox_everywhere_background_mode_manager.cc b/chrome/browser/background/omnibox_everywhere/omnibox_everywhere_background_mode_manager.cc
+index b01a62eae2..b769b0d4b0 100644
+--- a/chrome/browser/background/omnibox_everywhere/omnibox_everywhere_background_mode_manager.cc
++++ b/chrome/browser/background/omnibox_everywhere/omnibox_everywhere_background_mode_manager.cc
+@@ -178,6 +178,11 @@ void OmniboxEverywhereBackgroundModeManager::ShowStatusIcon() {
+     status_icon_->AddObserver(this);
+ #if BUILDFLAG(IS_MAC)
+     status_icon_->SetOpenMenuWithSecondaryClick(true);
++#if !BUILDFLAG(GOOGLE_CHROME_BRANDING)
++    // Shy's one-color mark can follow the menu bar, white on a dark one;
++    // Google's colored G cannot.
++    status_icon_->SetImageTemplate(true);
++#endif
+ #endif
+     UpdateStatusIconContextMenu();
+   }
+diff --git a/chrome/browser/ui/omnibox/omnibox_everywhere/omnibox_everywhere_icon.cc b/chrome/browser/ui/omnibox/omnibox_everywhere/omnibox_everywhere_icon.cc
+index e9f0242490..8729aa6ff8 100644
+--- a/chrome/browser/ui/omnibox/omnibox_everywhere/omnibox_everywhere_icon.cc
++++ b/chrome/browser/ui/omnibox/omnibox_everywhere/omnibox_everywhere_icon.cc
+@@ -30,7 +30,8 @@ gfx::ImageSkia GetBaseIcon() {
+ #else
+   constexpr int kIconDipSize = 16;
+ #endif
+-  return gfx::CreateVectorIcon(vector_icons::kSearchIcon, kIconDipSize,
++  // Shy's mark in the menu bar, as Google Chrome shows its G there.
++  return gfx::CreateVectorIcon(vector_icons::kProductIcon, kIconDipSize,
+                                SK_ColorBLACK);
+ #endif
+ }
