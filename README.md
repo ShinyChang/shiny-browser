@@ -95,6 +95,23 @@ An extension cannot accept connections, so [agent-relay/](agent-relay) sits in b
 speak MCP over HTTP to `/mcp`, and the extension keeps a WebSocket open to `/extension`. Both
 present the token in `~/.config/shy/token`.
 
+```mermaid
+flowchart LR
+  agent["Agent<br/>Claude Code, a chat bot"]
+  relay["agent-relay<br/>127.0.0.1:8796"]
+  subgraph mac["Shy, on your Mac"]
+    direction TB
+    panel["Talk to Shy<br/>side panel"]
+    tabs["Your tabs"]
+    panel -- "chrome.debugger:<br/>input, tree, network" --> tabs
+  end
+  slack["Slack channel<br/>(optional)"]
+  agent -- "MCP over HTTP: /mcp<br/>local, or behind Cloudflare Access" --> relay
+  relay <-- "WebSocket: /extension<br/>local, or through a Cloudflare Tunnel" --> panel
+  relay <-. "the panel's chat,<br/>a thread per conversation" .-> slack
+  agent <-. "mentions and replies" .-> slack
+```
+
     cd agent-relay && npm ci && node server.mjs
 
 The relay listens on 127.0.0.1:8796. To reach Shy wherever it is, publish `/extension`, for
