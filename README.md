@@ -3,7 +3,7 @@
 Shy is a personal browser built from Chromium stable for macOS: one toolbar, no tab strip,
 everything a keystroke away.
 
-https://github.com/user-attachments/assets/feca5615-e634-4ed0-a52b-7ea9269ca795
+https://github.com/user-attachments/assets/97099246-e78c-4017-a90f-abc30c6af8ba
 
 ![Shy showing a Wikipedia article: one toolbar, no tab strip](docs/screenshots/browse.webp)
 
