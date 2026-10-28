@@ -235,7 +235,7 @@ async function describe(tool, args) {
     case 'close_tab': return `Closing a tab${on}`;
     case 'read_page': return `Reading ${page}`;
     case 'screenshot': return `Taking a screenshot of ${page}`;
-    case 'click': return `Clicking ${args.selector ?? `at ${args.x}, ${args.y}`}${on}`;
+    case 'click': return `Clicking ${args.ref ?? args.selector ?? `at ${args.x}, ${args.y}`}${on}`;
     case 'type_text': return `Typing${on}`;
     case 'press_key': return `Pressing ${args.key}${on}`;
     case 'scroll': return `Scrolling ${page}`;
@@ -249,25 +249,72 @@ async function describe(tool, args) {
   }
 }
 
-async function handleCall(ws, { id, tool, args }) {
+async function runTool(tool, args) {
   // ok stays null while the call runs, so the panel can show it as it happens.
-  const entry = { at: Date.now(), tool, ok: null, detail: await describe(tool, args ?? {}) };
+  const entry = { at: Date.now(), tool, ok: null, detail: await describe(tool, args) };
   log.unshift(entry);
   log.length = Math.min(log.length, LOG_SIZE);
   notifyPanel();
   try {
     if (!Object.hasOwn(TOOLS, tool)) throw new Error(`Talk to Shy has no tool named ${tool}`);
-    const content = await TOOLS[tool](args ?? {});
+    const content = await TOOLS[tool](args);
     entry.ok = true;
     entry.host = content?.host;
-    ws.send(JSON.stringify({ type: 'result', id, ok: true, content }));
+    return content;
   } catch (error) {
     entry.ok = false;
     entry.error = error.message;
+    throw error;
+  } finally {
+    entry.endedAt = Date.now();
+    notifyPanel();
+  }
+}
+
+const BATCH_LIMIT = 50;
+const WAIT_LIMIT_MS = 10000;
+// Tools that take no tabId, or (close_tab) must never get one the agent did not name.
+const NO_DEFAULT_TAB = new Set(['list_tabs', 'open_tab', 'close_tab']);
+
+// One relay round trip for the whole run; later actions usually depend on earlier ones, so the
+// first failure skips the rest.
+async function runBatch({ tabId, actions }) {
+  if (!Array.isArray(actions) || !actions.length) throw new Error('batch needs a list of actions');
+  if (actions.length > BATCH_LIMIT) throw new Error(`batch takes at most ${BATCH_LIMIT} actions`);
+  // Fixed at the start, so the user switching tabs mid-run does not move the rest elsewhere.
+  const defaultTab = tabId ?? (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]?.id;
+  const results = [];
+  let failed = false;
+  for (const { tool, args = {} } of actions) {
+    if (failed) {
+      results.push({ tool, skipped: true });
+      continue;
+    }
+    try {
+      if (tool === 'batch') throw new Error('A batch cannot hold another batch');
+      if (tool === 'wait') {
+        const ms = Math.min(Math.max(Number(args.ms) || 0, 0), WAIT_LIMIT_MS);
+        await new Promise((resolve) => setTimeout(resolve, ms));
+        results.push({ tool, ok: true, content: { waited: ms } });
+        continue;
+      }
+      const withTab = NO_DEFAULT_TAB.has(tool) || args.tabId !== undefined ? args : { ...args, tabId: defaultTab };
+      results.push({ tool, ok: true, content: await runTool(tool, withTab) });
+    } catch (error) {
+      failed = true;
+      results.push({ tool, ok: false, error: error.message });
+    }
+  }
+  return { results };
+}
+
+async function handleCall(ws, { id, tool, args }) {
+  try {
+    const content = tool === 'batch' ? await runBatch(args ?? {}) : await runTool(tool, args ?? {});
+    ws.send(JSON.stringify({ type: 'result', id, ok: true, content }));
+  } catch (error) {
     ws.send(JSON.stringify({ type: 'result', id, ok: false, error: error.message }));
   }
-  entry.endedAt = Date.now();
-  notifyPanel();
 }
 
 // The built-in panel can see incognito windows, which the user keeps private from it.
@@ -430,9 +477,36 @@ async function screenshot(tabId) {
   return { image: { data, mimeType: 'image/jpeg' }, width: Math.round(view.clientWidth), height: Math.round(view.clientHeight) };
 }
 
+// A background tab gets no input: clicks and keys never reach the page, and a wheel event is
+// never acknowledged, which stalls every later command on that tab.
+async function inFront(tabId, tool) {
+  if ((await evaluate(tabId, 'document.visibilityState')) === 'hidden') {
+    throw new Error(`${tool} needs the tab in front: input to a background tab never reaches the page. Open it with open_tab and active: true, or ask the user to switch to it.`);
+  }
+}
+
+const INPUT_TIMEOUT_MS = 10000;
+
+// The tab can still go to the background mid-call; detaching drops the stalled command so the
+// next call attaches afresh instead of queueing behind it.
+async function input(tabId, method, params) {
+  let timer;
+  const stalled = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      chrome.debugger.detach({ tabId }).catch(() => {});
+      reject(new Error('The page did not take the input; the tab may have gone to the background'));
+    }, INPUT_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([cdp(tabId, method, params), stalled]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function clickAt(tabId, x, y) {
   for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
-    await cdp(tabId, 'Input.dispatchMouseEvent', {
+    await input(tabId, 'Input.dispatchMouseEvent', {
       type, x, y, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1,
     });
   }
@@ -450,6 +524,96 @@ async function center(tabId, selector) {
   return point;
 }
 
+// A ref is the element's backend node id, which the renderer keeps for as long as the element
+// lives, so refs need no state here and survive this worker being stopped.
+async function refPoint(tabId, ref) {
+  const backendNodeId = Number(/^e(\d+)$/.exec(ref ?? '')?.[1]);
+  if (!backendNodeId) throw new Error(`${ref} is not a ref; read_page with format "tree" lists them`);
+  const gone = new Error(`${ref} is no longer on the page; read the tree again`);
+  const { object } = await cdp(tabId, 'DOM.resolveNode', { backendNodeId }).catch(() => { throw gone; });
+  const { result } = await cdp(tabId, 'Runtime.callFunctionOn', {
+    objectId: object.objectId,
+    returnByValue: true,
+    functionDeclaration: `function () {
+      if (!this.isConnected) return false;
+      (this.nodeType === 1 ? this : this.parentElement).scrollIntoView({ block: 'center', inline: 'center' });
+      return true;
+    }`,
+  });
+  cdp(tabId, 'Runtime.releaseObject', { objectId: object.objectId }).catch(() => {});
+  if (!result.value) throw gone;
+  // Content quads are in the top page's viewport even for an element inside a frame, as input wants.
+  const { quads } = await cdp(tabId, 'DOM.getContentQuads', { backendNodeId }).catch(() => ({ quads: [] }));
+  if (!quads.length) throw new Error(`${ref} takes up no space on the page, so there is nowhere to point at`);
+  const [q] = quads;
+  return { x: (q[0] + q[2] + q[4] + q[6]) / 4, y: (q[1] + q[3] + q[5] + q[7]) / 4 };
+}
+
+const TREE_LIMIT = 30000;
+const ACTIONABLE_ROLES = new Set([
+  'button', 'link', 'textbox', 'searchbox', 'combobox', 'checkbox', 'radio', 'switch', 'slider', 'spinbutton',
+  'tab', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'treeitem', 'listbox', 'PopUpButton',
+  'ToggleButton', 'DisclosureTriangle', 'MenuListOption', 'ListBoxOption',
+]);
+// Without a name these only wrap their children, which take their place.
+const WRAPPER_ROLES = new Set(['generic', 'none', 'presentation', 'paragraph', 'group', 'LabelText', 'Section', 'Pre', 'Abbr',
+  'LayoutTable', 'LayoutTableRow', 'LayoutTableCell']);
+const SKIPPED_ROLES = new Set(['InlineTextBox', 'LineBreak']);
+// States are worth showing either way (an unchecked box); flags only when set.
+const STATES = ['checked', 'pressed', 'expanded'];
+const FLAGS = ['selected', 'disabled', 'required', 'focused'];
+
+function formatTree(nodes, interactive) {
+  const byId = new Map(nodes.map((node) => [node.nodeId, node]));
+  const lines = [];
+  let size = 0;
+  let cut = false;
+  const walk = (node, depth, around) => {
+    const role = node?.role?.value ?? '';
+    if (cut || !node || SKIPPED_ROLES.has(role)) return;
+    const name = String(node.name?.value ?? '').replace(/\s+/g, ' ').trim();
+    const props = Object.fromEntries((node.properties ?? []).map((p) => [p.name, p.value?.value]));
+    let shown = !node.ignored && role !== 'RootWebArea';
+    // Text that only repeats its button's or link's name adds nothing.
+    if (shown && role === 'StaticText') shown = !interactive && name !== '' && !around.includes(name);
+    else if (shown && interactive) shown = ACTIONABLE_ROLES.has(role) || props.focusable === true || props.editable !== undefined;
+    else if (shown) shown = name !== '' || !WRAPPER_ROLES.has(role);
+    if (shown) {
+      let line = role === 'StaticText' ? `text "${clip(name, 300)}"` : `${role}${name ? ` "${clip(name, 100)}"` : ''}`;
+      if (role !== 'StaticText' && node.backendDOMNodeId) line += ` [ref=e${node.backendDOMNodeId}]`;
+      const value = node.value?.value;
+      if (value !== undefined && value !== '' && String(value) !== name) line += ` value="${clip(String(value), 100)}"`;
+      for (const key of STATES) if (props[key] !== undefined) line += ` ${key}=${props[key]}`;
+      for (const key of FLAGS) if (props[key] === true) line += ` ${key}`;
+      if (props.level !== undefined) line += ` level=${props.level}`;
+      if (props.url) line += ` url=${clip(String(props.url), 120)}`;
+      line = `${'  '.repeat(depth)}- ${line}`;
+      if (size + line.length > TREE_LIMIT) {
+        cut = true;
+        return;
+      }
+      lines.push(line);
+      size += line.length + 1;
+    }
+    for (const childId of node.childIds ?? []) {
+      walk(byId.get(childId), shown ? depth + 1 : depth, shown && name ? name : around);
+    }
+  };
+  walk(nodes.find((node) => !node.parentId), 0, '');
+  return { tree: lines.join('\n'), cut };
+}
+
+async function pageTree(tabId, interactive) {
+  const { nodes } = await cdp(tabId, 'Accessibility.getFullAXTree');
+  // Reading the tree may leave accessibility on, which makes every later change to the page cost more.
+  cdp(tabId, 'Accessibility.disable').catch(() => {});
+  const { tree, cut } = formatTree(nodes, interactive);
+  return {
+    tree,
+    ...(cut && { note: `The tree was cut at ${TREE_LIMIT.toLocaleString('en')} characters.${interactive ? '' : ' interactive: true lists only what can be clicked or typed into.'}` }),
+  };
+}
+
 const KEY_CODES = {
   Enter: 13, Tab: 9, Escape: 27, Backspace: 8, Delete: 46, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39,
   ArrowDown: 40, Home: 36, End: 35, PageUp: 33, PageDown: 34, ' ': 32,
@@ -462,8 +626,8 @@ async function pressKey(tabId, key, modifiers = []) {
   // With Control or Meta held, a letter is a shortcut rather than text.
   const text = key === 'Enter' ? '\r' : single && !(bits & (MODIFIERS.Control | MODIFIERS.Meta)) ? key : undefined;
   const event = { key, windowsVirtualKeyCode: KEY_CODES[key] ?? (single ? key.toUpperCase().charCodeAt(0) : 0), modifiers: bits };
-  await cdp(tabId, 'Input.dispatchKeyEvent', { ...event, type: text ? 'keyDown' : 'rawKeyDown', ...(text && { text }) });
-  await cdp(tabId, 'Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+  await input(tabId, 'Input.dispatchKeyEvent', { ...event, type: text ? 'keyDown' : 'rawKeyDown', ...(text && { text }) });
+  await input(tabId, 'Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
 }
 
 async function loadNewDocument(tabId, method, params) {
@@ -491,9 +655,10 @@ const TOOLS = {
       .filter((t) => !t.incognito && (!needle || `${t.title} ${t.url}`.toLowerCase().includes(needle)))
       .map(({ id, windowId, title, url }) => ({ id, windowId, title, url, active: id === current?.id }));
   },
-  async read_page({ tabId }) {
+  async read_page({ tabId, format = 'text', interactive = false }) {
     const { tab, host } = await targetTab(tabId, 'read_page');
-    return { host, ...(await inPage(tab.id, readPage, [50000])) };
+    if (format !== 'tree') return { host, ...(await inPage(tab.id, readPage, [50000])) };
+    return { host, title: tab.title, url: tab.url, ...(await pageTree(tab.id, interactive)) };
   },
   async list_webmcp_tools({ tabId }) {
     const { tab, host } = await targetTab(tabId, 'list_webmcp_tools');
@@ -532,34 +697,41 @@ const TOOLS = {
     }
     return { host, result: result ?? null };
   },
-  async click({ tabId, x, y, selector }) {
+  async click({ tabId, x, y, selector, ref }) {
     const { tab, host } = await targetTab(tabId, 'click');
-    await approveAction(tab, host, 'control', `Let your agent use ${host}?`, selector ? `Click ${selector}` : `Click at ${x}, ${y}`);
-    const point = selector ? await center(tab.id, selector) : { x, y };
+    await inFront(tab.id, 'click');
+    const target = ref ?? selector;
+    await approveAction(tab, host, 'control', `Let your agent use ${host}?`, target ? `Click ${target}` : `Click at ${x}, ${y}`);
+    const point = ref ? await refPoint(tab.id, ref) : selector ? await center(tab.id, selector) : { x, y };
     await clickAt(tab.id, point.x, point.y);
     return { host, clicked: point };
   },
-  async type_text({ tabId, text, selector }) {
+  async type_text({ tabId, text, selector, ref }) {
     const { tab, host } = await targetTab(tabId, 'type_text');
-    await approveAction(tab, host, 'control', `Let your agent use ${host}?`, `Type "${text}"${selector ? ` into ${selector}` : ''}`);
-    if (selector) {
-      const point = await center(tab.id, selector);
+    await inFront(tab.id, 'type_text');
+    const target = ref ?? selector;
+    await approveAction(tab, host, 'control', `Let your agent use ${host}?`, `Type "${text}"${target ? ` into ${target}` : ''}`);
+    if (target) {
+      const point = ref ? await refPoint(tab.id, ref) : await center(tab.id, selector);
       await clickAt(tab.id, point.x, point.y);
     }
-    await cdp(tab.id, 'Input.insertText', { text });
+    await input(tab.id, 'Input.insertText', { text });
     return { host, typed: text.length };
   },
   async press_key({ tabId, key, modifiers }) {
     const { tab, host } = await targetTab(tabId, 'press_key');
+    await inFront(tab.id, 'press_key');
     await approveAction(tab, host, 'control', `Let your agent use ${host}?`, `Press ${[...(modifiers ?? []), key].join('+')}`);
     await pressKey(tab.id, key, modifiers);
     return { host, pressed: key };
   },
-  async scroll({ tabId, x, y, deltaX = 0, deltaY = 0 }) {
+  async scroll({ tabId, x, y, ref, deltaX = 0, deltaY = 0 }) {
     const { tab, host } = await targetTab(tabId, 'scroll');
-    await approveAction(tab, host, 'control', `Let your agent use ${host}?`, `Scroll by ${deltaX}, ${deltaY}`);
+    await inFront(tab.id, 'scroll');
+    await approveAction(tab, host, 'control', `Let your agent use ${host}?`, `Scroll by ${deltaX}, ${deltaY}${ref ? ` over ${ref}` : ''}`);
     const middle = await evaluate(tab.id, '({ x: innerWidth / 2, y: innerHeight / 2 })');
-    await cdp(tab.id, 'Input.dispatchMouseEvent', { type: 'mouseWheel', x: x ?? middle.x, y: y ?? middle.y, deltaX, deltaY });
+    const at = ref ? await refPoint(tab.id, ref) : { x: x ?? middle.x, y: y ?? middle.y };
+    await input(tab.id, 'Input.dispatchMouseEvent', { type: 'mouseWheel', x: at.x, y: at.y, deltaX, deltaY });
     await new Promise((resolve) => setTimeout(resolve, 300));
     return { host, scroll: await evaluate(tab.id, '({ x: scrollX, y: scrollY })') };
   },

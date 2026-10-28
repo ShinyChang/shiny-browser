@@ -70,12 +70,14 @@ browser and its WebMCP tools:
 ### Talk to Shy
 
 [talk-to-shy/](talk-to-shy) lets an agent on another machine, such as a chat bot, work with the
-tabs you have open. Its MCP tools read (`list_tabs` across windows, `read_page`, `screenshot`),
-open and close tabs of their own (`open_tab` works in the background, `close_tab`), drive with real
-input (`click`, `type_text`, `press_key`, `scroll`, `navigate`), run scripts (`run_script`), read the
-debugger's network log (`network_requests`, including requests that failed before any response,
-and `network_request` for headers and body, with credentials hidden) and use a page's WebMCP tools
-(`list_webmcp_tools`, `call_webmcp_tool`). With "Use and drive any site without
+tabs you have open. Its MCP tools read (`list_tabs` across windows, `read_page` as text or as an
+accessibility tree with a ref for each element, `screenshot`), open and close tabs of their own
+(`open_tab` works in the background, `close_tab`), drive with real input (`click`, `type_text`,
+`press_key`, `scroll`, `navigate`; an element is a ref, a CSS selector or a point), run scripts
+(`run_script`), read the debugger's network log (`network_requests`, including requests that failed
+before any response, and `network_request` for headers and body, with credentials hidden), use a
+page's WebMCP tools (`list_webmcp_tools`, `call_webmcp_tool`) and run several of these in one call
+(`batch`, which stops at the first failure). With "Use and drive any site without
 asking" on, the default, all of them work on any site without a prompt. Turn it off and a site you
 have not listed waits until you allow it, and so does each kind of action on a site (driving,
 scripts, a WebMCP tool that changes the page): the side panel shows the request, the toolbar

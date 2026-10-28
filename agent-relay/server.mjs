@@ -38,8 +38,15 @@ const TOOLS = [
   },
   {
     name: 'read_page',
-    description: 'Returns the title, URL and visible text of a tab. On a site the user has not allowed yet, it waits until they allow it in Shy.',
-    inputSchema: { type: 'object', properties: { tabId } },
+    description: 'Returns the title, URL and visible text of a tab, or with format "tree" its accessibility tree: one line per element with its role, name, state and a ref (such as e123) that click, type_text and scroll take. A ref lasts as long as its element; after the page changes, read the tree again. What is inside frames is not included. On a site the user has not allowed yet, it waits until they allow it in Shy.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId,
+        format: { type: 'string', enum: ['text', 'tree'], description: 'text (the default) or tree.' },
+        interactive: { type: 'boolean', description: 'With format "tree", list only what can be clicked or typed into.' },
+      },
+    },
   },
   {
     name: 'list_webmcp_tools',
@@ -75,18 +82,24 @@ const TOOLS = [
   },
   {
     name: 'click',
-    description: 'Clicks with real mouse events, at a point (CSS pixels, as in screenshot) or at the middle of the first element a CSS selector matches, scrolled into view. Prefer a selector: it survives scrolling and layout changes.',
+    description: 'Clicks with real mouse events, at the middle of an element (a ref from read_page\'s tree, or the first match of a CSS selector), scrolled into view, or at a point (CSS pixels, as in screenshot). Prefer a ref or a selector: they survive scrolling and layout changes.',
     inputSchema: {
       type: 'object',
-      properties: { tabId, x: { type: 'number' }, y: { type: 'number' }, selector: { type: 'string', description: 'Clicks this element instead of a point.' } },
+      properties: {
+        tabId,
+        ref: { type: 'string', description: 'Clicks this element from read_page\'s tree.' },
+        selector: { type: 'string', description: 'Clicks this element instead of a point.' },
+        x: { type: 'number' },
+        y: { type: 'number' },
+      },
     },
   },
   {
     name: 'type_text',
-    description: 'Types text, as if pasted from a keyboard, into the focused element, or into the element a CSS selector matches after clicking it.',
+    description: 'Types text, as if pasted from a keyboard, into the focused element, or into an element (a ref or a CSS selector) after clicking it.',
     inputSchema: {
       type: 'object',
-      properties: { tabId, text: { type: 'string' }, selector: { type: 'string' } },
+      properties: { tabId, text: { type: 'string' }, ref: { type: 'string' }, selector: { type: 'string' } },
       required: ['text'],
     },
   },
@@ -105,10 +118,10 @@ const TOOLS = [
   },
   {
     name: 'scroll',
-    description: 'Scrolls with the mouse wheel at a point (the middle of the view if left out) and returns the new scroll position.',
+    description: 'Scrolls with the mouse wheel over an element (a ref, for a scrolling box) or at a point (the middle of the view if left out) and returns the new scroll position.',
     inputSchema: {
       type: 'object',
-      properties: { tabId, x: { type: 'number' }, y: { type: 'number' }, deltaX: { type: 'number' }, deltaY: { type: 'number' } },
+      properties: { tabId, ref: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, deltaX: { type: 'number' }, deltaY: { type: 'number' } },
     },
   },
   {
@@ -118,7 +131,7 @@ const TOOLS = [
   },
   {
     name: 'open_tab',
-    description: "Opens a URL in a new tab in the user's window, in the background unless active is true, waits for it to load and returns its tab id.",
+    description: "Opens a URL in a new tab in the user's window, in the background unless active is true, waits for it to load and returns its tab id. A background tab can be read (read_page, screenshot, run_script, the network log), but clicks, keys and scrolling only reach a tab in front, so pass active: true to drive it.",
     inputSchema: { type: 'object', properties: { url: { type: 'string' }, active: { type: 'boolean', description: 'Shows the new tab to the user.' } }, required: ['url'] },
   },
   {
@@ -151,6 +164,26 @@ const TOOLS = [
         body: { type: 'boolean', description: 'Also return the response body.' },
       },
       required: ['requestId'],
+    },
+  },
+  {
+    name: 'batch',
+    description: 'Runs several of these tools in order in one call, much faster than one call each: for example click, type_text, press_key, wait, then screenshot. Each action is { tool, args }; any tool but batch, plus wait with args { ms } (up to 10,000). It stops at the first action that fails and returns every result, the failure and the skipped rest. Actions without a tabId use the batch\'s tabId, or the tab the user was looking at when it started.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId,
+        actions: {
+          type: 'array',
+          maxItems: 50,
+          items: {
+            type: 'object',
+            properties: { tool: { type: 'string' }, args: { type: 'object' } },
+            required: ['tool'],
+          },
+        },
+      },
+      required: ['actions'],
     },
   },
 ];
@@ -278,6 +311,25 @@ function callExtension(tool, args) {
   });
 }
 
+// A screenshot goes back as an image the agent can look at, and a tree as plain lines rather
+// than one escaped JSON string.
+function toBlocks(content) {
+  if (!content?.image && content?.tree === undefined) return [{ type: 'text', text: JSON.stringify(content, null, 2) }];
+  const { image, tree, ...rest } = content;
+  return [
+    ...(image ? [{ type: 'image', data: image.data, mimeType: image.mimeType }] : []),
+    { type: 'text', text: JSON.stringify(rest) },
+    ...(tree !== undefined ? [{ type: 'text', text: tree }] : []),
+  ];
+}
+
+function batchBlocks({ results }) {
+  return results.flatMap(({ tool, ok, skipped, content, error }, i) => [
+    { type: 'text', text: `${i + 1}. ${tool}: ${skipped ? 'skipped' : ok ? 'ok' : `failed: ${error}`}` },
+    ...(ok ? toBlocks(content) : []),
+  ]);
+}
+
 async function handleRpc({ id, method, params }) {
   switch (method) {
     case 'initialize':
@@ -295,12 +347,9 @@ async function handleRpc({ id, method, params }) {
       if (!TOOLS.some((tool) => tool.name === name)) throw Object.assign(new Error(`Unknown tool ${name}`), { code: -32602 });
       try {
         const content = await callExtension(name, args ?? {});
-        // A screenshot goes back as an image the agent can look at.
-        if (content?.image) {
-          const { image, ...rest } = content;
-          return { content: [{ type: 'image', data: image.data, mimeType: image.mimeType }, { type: 'text', text: JSON.stringify(rest) }] };
-        }
-        return { content: [{ type: 'text', text: JSON.stringify(content, null, 2) }] };
+        if (name !== 'batch') return { content: toBlocks(content) };
+        const failed = content.results.some((result) => result.ok === false);
+        return { content: batchBlocks(content), ...(failed && { isError: true }) };
       } catch (error) {
         return { content: [{ type: 'text', text: error.message }], isError: true };
       }
