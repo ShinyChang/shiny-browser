@@ -7,7 +7,8 @@
 # SPARKLE_DIR is an unpacked Sparkle release, ED_KEY_FILE the private EdDSA key
 # exported by its generate_keys, SIGN_IDENTITY the identity the installed copy
 # is signed with, and FEED_URL the appcast's URL, such as
-# http://studio.local:8790/appcast.xml. Only the two newest updates are kept.
+# http://studio.local:8790/appcast.xml. Only the four newest updates are kept,
+# the older three as the bases of the newest one's deltas.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -67,9 +68,11 @@ fi
 ditto -c -k --sequesterRsrc --keepParent "$NEW" "$UPDATES/$NAME-$short-$n.zip"
 echo "$n" > "$UPDATES/build-number"
 
-# Downloads over the LAN are quick, and deltas of Chromium are slow to make.
+# A rebuild of one Chromium version changes little: a delta from each of the last three updates
+# is a few MB instead of the whole app (9 MB against 194 MB), for about two minutes and 4 GB of
+# memory apiece. Sparkle falls back to the full archive when a delta does not apply.
 "$SPARKLE_DIR/bin/generate_appcast" --ed-key-file "$ED_KEY_FILE" \
-  --download-url-prefix "${FEED_URL%/*}/" --maximum-deltas 0 --maximum-versions 2 "$UPDATES"
+  --download-url-prefix "${FEED_URL%/*}/" --maximum-deltas 3 --maximum-versions 4 "$UPDATES"
 rm -rf "$UPDATES/old_updates"
 # Its cache keeps a whole extracted app per archive and never drops old ones.
 rm -rf "$HOME/Library/Caches/Sparkle_generate_appcast"
