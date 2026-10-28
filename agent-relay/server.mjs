@@ -594,4 +594,6 @@ sockets.on('connection', (ws) => {
   });
 });
 
+// Outlive cloudflared's 90 s idle pool: a POST it sends down a connection the relay just closed comes back as a 502.
+server.keepAliveTimeout = 120_000;
 server.listen(PORT, HOST, () => console.log(`shy relay on ${HOST}:${PORT}`));
