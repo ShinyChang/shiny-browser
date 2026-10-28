@@ -103,7 +103,8 @@ or, for agents on other machines, publish it under a hostname of its own behind 
 with a Service Auth policy, so that only requests carrying the service token's
 `CF-Access-Client-Id` and `CF-Access-Client-Secret` reach the relay's own token check. Then load
 `talk-to-shy/` from `chrome://extensions` with Developer mode on, open its side panel and enter
-the relay's address and the token. It reconnects within seconds when the relay or the tunnel
+the token, and the relay's address unless it is the local relay at the default,
+`ws://127.0.0.1:8796/extension`. It reconnects within seconds when the relay or the tunnel
 restarts.
 
 With `SLACK_CHANNEL` and `SLACK_AGENT` (the agent's Slack user id) set, the chat goes through

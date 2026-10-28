@@ -505,12 +505,12 @@ index e750a678fc..eea04330be 100644
  });
  // A service worker stopped while the relay was down has nothing left to wake it.
 diff --git a/chrome/browser/resources/talk_to_shy/defaults.js b/chrome/browser/resources/talk_to_shy/defaults.js
-index 042900a04d..b7471888c3 100644
+index 887fbfdb7e..2fdf61d787 100644
 --- a/chrome/browser/resources/talk_to_shy/defaults.js
 +++ b/chrome/browser/resources/talk_to_shy/defaults.js
 @@ -1,7 +1,7 @@
  export const DEFAULTS = {
-   relayUrl: 'wss://shy.shinychang.net/extension',
+   relayUrl: 'ws://127.0.0.1:8796/extension',
    token: '',
 -  // When off, a site outside allowedHosts waits for the user to allow it.
 +  // When off, a site outside allowedHosts, and each kind of action on a site, wait for the user to allow them.

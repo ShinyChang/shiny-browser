@@ -1,5 +1,5 @@
 export const DEFAULTS = {
-  relayUrl: 'wss://shy.shinychang.net/extension',
+  relayUrl: 'ws://127.0.0.1:8796/extension',
   token: '',
   // When off, a site outside allowedHosts, and each kind of action on a site, wait for the user to allow them.
   allowAllSites: true,
