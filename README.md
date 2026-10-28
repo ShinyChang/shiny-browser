@@ -122,6 +122,8 @@ publish its `/extension` under its own hostname.
 
 ## Build
 
+- A link button in the location bar, shown while the pointer is over it, copies the address; a
+  click on the address edits it.
 Shy is Chromium stable at the version in [CHROMIUM_VERSION](CHROMIUM_VERSION) plus the commits
 in [patches/](patches), one per feature, compiled with [args.gn](args.gn). On a Mac with Xcode
 and 45 GB free:

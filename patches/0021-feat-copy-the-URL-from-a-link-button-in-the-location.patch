@@ -1,0 +1,144 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shiny <owner@shinychang.net>
+Date: Wed, 28 Oct 2026 21:33:24 +0800
+Subject: [PATCH] feat: copy the URL from a link button in the location bar
+
+- While the pointer is over the location bar and the address is not
+  being edited, a link button at its end copies the address.
+- A click on the address edits it, as in Chrome.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
+---
+ .../views/location_bar/location_bar_view.cc   | 40 +++++++++++++++++++
+ .../ui/views/location_bar/location_bar_view.h |  3 ++
+ 2 files changed, 43 insertions(+)
+
+diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.cc b/chrome/browser/ui/views/location_bar/location_bar_view.cc
+index bac174d0b2..7385e0870b 100644
+--- a/chrome/browser/ui/views/location_bar/location_bar_view.cc
++++ b/chrome/browser/ui/views/location_bar/location_bar_view.cc
+@@ -16,6 +16,7 @@
+ #include "base/metrics/field_trial_params.h"
+ #include "base/trace_event/trace_event.h"
+ #include "build/build_config.h"
++#include "chrome/app/chrome_command_ids.h"
+ #include "chrome/app/vector_icons/vector_icons.h"
+ #include "chrome/browser/actor/ui/actor_ui_window_controller.h"
+ #include "chrome/browser/autocomplete/aim_eligibility_service_factory.h"
+@@ -31,6 +32,7 @@
+ #include "chrome/browser/translate/translate_service.h"
+ #include "chrome/browser/ui/actions/chrome_action_id.h"
+ #include "chrome/browser/ui/browser_actions.h"
++#include "chrome/browser/ui/browser_commands.h"
+ #include "chrome/browser/ui/browser_element_identifiers.h"
+ #include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+@@ -95,6 +97,7 @@
+ #include "chrome/common/chrome_features.h"
+ #include "chrome/grit/generated_resources.h"
+ #include "chrome/grit/omnibox_popup_resources.h"
++#include "components/vector_icons/vector_icons.h"
+ #include "components/commerce/core/commerce_feature_list.h"
+ #include "components/content_settings/core/browser/host_content_settings_map.h"
+ #include "components/content_settings/core/common/features.h"
+@@ -503,6 +506,27 @@ void LocationBarView::Init() {
+   clear_all_button_ = AddChildView(std::move(clear_all_button));
+   RefreshClearAllButtonIcon();
+ 
++  // Shy copies the address from a button shown while the pointer is over the location bar, so a
++  // click on the address still edits it.
++  auto copy_link_button = views::CreateVectorImageButton(base::BindRepeating(
++      [](LocationBarView* view) {
++        if (view->browser()) {
++          chrome::ExecuteCommand(view->browser(), IDC_COPY_URL);
++        }
++      },
++      base::Unretained(this)));
++  copy_link_button->SetTooltipText(u"Copy link");
++  copy_link_button->SetVisible(false);
++  copy_link_button_ = AddChildView(std::move(copy_link_button));
++  SetImageFromVectorIconWithColor(
++      copy_link_button_, vector_icons::kLinkIcon,
++      {kColorLocationBarClearAllButtonIcon,
++       kColorLocationBarClearAllButtonIconDisabled});
++  copy_link_button_->SetBorder(views::CreateEmptyBorder(
++      GetLayoutInsets(LOCATION_BAR_ICON_INTERIOR_PADDING)));
++  // Moving off the bar from over the button has to reach this view too, to hide the button.
++  SetNotifyEnterExitOnChild(true);
++
+   auto ai_mode_hint_label = std::make_unique<views::Label>(
+       std::u16string(), CONTEXT_OMNIBOX_PRIMARY, views::style::STYLE_PRIMARY);
+   ai_mode_hint_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+@@ -934,6 +958,8 @@ void LocationBarView::Layout(PassKey) {
+ 
+   add_trailing_decoration(clear_all_button_, /*intra_item_padding=*/0,
+                           /*edge_padding=*/trailing_decorations_edge_padding);
++  add_trailing_decoration(copy_link_button_, /*intra_item_padding=*/0,
++                          /*edge_padding=*/trailing_decorations_edge_padding);
+ 
+   // Perform layout.
+   int entry_width = width();
+@@ -2039,6 +2065,7 @@ void LocationBarView::OnChanged() {
+       GetOmniboxController()->edit_model()->user_input_in_progress() &&
+       !omnibox_view_->GetText().empty() &&
+       IsVirtualKeyboardVisible(GetWidget()));
++  UpdateCopyLinkButton(copy_link_button_->GetVisible());
+ 
+   InvalidateLayout();
+   SchedulePaint();
+@@ -2070,6 +2097,7 @@ void LocationBarView::OnOmniboxFocused() {
+   // The AI mode page action should only be visible when the omnibox
+   // is focused, so if there is a change in focus, refresh the icon.
+   RefreshAiModePageAction();
++  UpdateCopyLinkButton(false);
+ }
+ 
+ void LocationBarView::OpenOmniboxPopup(bool query_zps) {
+@@ -2081,6 +2109,7 @@ void LocationBarView::OpenOmniboxPopup(bool query_zps) {
+ }
+ 
+ void LocationBarView::OnOmniboxBlurred() {
++  UpdateCopyLinkButton(IsMouseHovered());
+   if (views::FocusRing::Get(this)) {
+     views::FocusRing::Get(this)->Refresh();
+   }
+@@ -2107,6 +2136,17 @@ void LocationBarView::OnOmniboxHovered(bool is_hovering) {
+   } else {
+     hover_animation_.Hide();
+   }
++  // Leaving the text for the button itself counts as an exit, though the pointer is still here.
++  UpdateCopyLinkButton(is_hovering || IsMouseHovered());
++}
++
++void LocationBarView::UpdateCopyLinkButton(bool hovered) {
++  const bool show = hovered && omnibox_view_ && !omnibox_view_->HasFocus() &&
++                    !omnibox_view_->GetText().empty();
++  if (copy_link_button_->GetVisible() != show) {
++    copy_link_button_->SetVisible(show);
++    InvalidateLayout();
++  }
+ }
+ 
+ void LocationBarView::OnTouchUiChanged() {
+diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.h b/chrome/browser/ui/views/location_bar/location_bar_view.h
+index 05979cd142..3b3a97d137 100644
+--- a/chrome/browser/ui/views/location_bar/location_bar_view.h
++++ b/chrome/browser/ui/views/location_bar/location_bar_view.h
+@@ -376,6 +376,7 @@ class LocationBarView
+ 
+   // Updates the color of the icon for the "clear all" button.
+   void RefreshClearAllButtonIcon();
++  void UpdateCopyLinkButton(bool hovered);
+ 
+   // Returns true if a keyword is selected in the model.
+   bool ShouldShowKeywordBubble() const;
+@@ -596,6 +597,8 @@ class LocationBarView
+   // user to clear all text.
+   raw_ptr<views::ImageButton> clear_all_button_ = nullptr;
+ 
++  raw_ptr<views::ImageButton> copy_link_button_ = nullptr;
++
+   // A label to show the AI Mode hint text.
+   raw_ptr<views::Label> ai_mode_hint_label_ = nullptr;
+ 
