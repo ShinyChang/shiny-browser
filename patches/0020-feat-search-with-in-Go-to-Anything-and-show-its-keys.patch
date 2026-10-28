@@ -1,0 +1,151 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Shiny <owner@shinychang.net>
+Date: Wed, 28 Oct 2026 15:47:35 +0800
+Subject: [PATCH] =?UTF-8?q?feat:=20search=20with=20=E2=8C=98=E2=86=B5=20in?=
+ =?UTF-8?q?=20Go=20to=20Anything=20and=20show=20its=20keys=20as=20keycaps?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- ⌘↵ takes what was typed as the address bar would, even when matched
+  tabs push the search row to the bottom.
+- The footer shows each key on a keycap beside its action, drops the
+  arrow and Escape hints and puts the tab count on the right.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
+---
+ chrome/browser/ui/views/ide/ide_palette.cc | 78 ++++++++++++++++++----
+ 1 file changed, 64 insertions(+), 14 deletions(-)
+
+diff --git a/chrome/browser/ui/views/ide/ide_palette.cc b/chrome/browser/ui/views/ide/ide_palette.cc
+index 25ff6b8209..8eaad9b1e8 100644
+--- a/chrome/browser/ui/views/ide/ide_palette.cc
++++ b/chrome/browser/ui/views/ide/ide_palette.cc
+@@ -104,6 +104,9 @@ constexpr int kListMaxHeight = 470;
+ constexpr int kTitleWidth = 430;
+ constexpr int kRowRadius = 6;
+ constexpr int kPreviewGap = 12;
++constexpr int kHintGap = 14;
++constexpr int kKeyGap = 5;
++constexpr int kKeyRadius = 4;
+ // About the shape of a browser window's page area.
+ constexpr gfx::Size kPreviewSize(300, 188);
+ constexpr int kPreviewIconSize = 32;
+@@ -435,11 +438,12 @@ class PaletteContents : public views::View, public views::TextfieldController {
+       AddPreview(body);
+     }
+ 
+-    footer_ = AddChildView(std::make_unique<views::Label>(
+-        std::u16string(), views::style::CONTEXT_LABEL,
+-        views::style::STYLE_SECONDARY));
+-    footer_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+-    footer_->SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(2, 6)));
++    footer_ = AddChildView(std::make_unique<views::View>());
++    footer_layout_ = footer_->SetLayoutManager(std::make_unique<views::BoxLayout>(
++        views::BoxLayout::Orientation::kHorizontal, gfx::Insets::VH(2, 6),
++        kHintGap));
++    footer_layout_->set_cross_axis_alignment(
++        views::BoxLayout::CrossAxisAlignment::kCenter);
+ 
+     Rebuild();
+   }
+@@ -482,7 +486,13 @@ class PaletteContents : public views::View, public views::TextfieldController {
+         }
+         break;
+       case ui::VKEY_RETURN:
+-        Accept(selected_);
++        // Matches push the search row to the bottom, so ⌘↵ reaches it from
++        // anywhere.
++        if (key_event.IsCommandDown() && has_navigate_item_) {
++          AcceptItem(navigate_item_);
++        } else {
++          Accept(selected_);
++        }
+         return true;
+       case ui::VKEY_ESCAPE:
+         GetWidget()->Close();
+@@ -881,11 +891,7 @@ class PaletteContents : public views::View, public views::TextfieldController {
+       list_->AddChildView(CreateSectionHeader(u"No matches"));
+     }
+ 
+-    footer_->SetText(
+-        mode_ == PaletteMode::kGoto
+-            ? u"↑↓ select   ↵ open   esc close   ⌘⇧P commands   " +
+-                  base::NumberToString16(tab_count_) + u" tabs open"
+-            : u"↑↓ select   ↵ run   esc close   ⌘T tabs and URLs");
++    UpdateFooter();
+     list_->InvalidateLayout();
+     UpdatePreview();
+     resize_.Run();
+@@ -916,15 +922,58 @@ class PaletteContents : public views::View, public views::TextfieldController {
+         (static_cast<int>(selected_) + delta + count) % count));
+   }
+ 
++  // A keycap pairs each key with its action; the tab count is status, not a
++  // key, so it stands apart on the right.
++  void UpdateFooter() {
++    footer_->RemoveAllChildViews();
++    std::vector<std::pair<std::u16string, std::u16string>> hints;
++    if (mode_ == PaletteMode::kGoto) {
++      hints.emplace_back(u"↵", u"open");
++      if (has_navigate_item_ && !navigate_first_) {
++        hints.emplace_back(u"⌘↵", u"search");
++      }
++      hints.emplace_back(u"⌘⇧P", u"commands");
++    } else {
++      hints.emplace_back(u"↵", u"run");
++      hints.emplace_back(u"⌘T", u"tabs and URLs");
++    }
++    for (const auto& [keys, action] : hints) {
++      auto* hint = footer_->AddChildView(std::make_unique<views::View>());
++      hint->SetLayoutManager(std::make_unique<views::BoxLayout>(
++              views::BoxLayout::Orientation::kHorizontal, gfx::Insets(),
++              kKeyGap))
++          ->set_cross_axis_alignment(
++              views::BoxLayout::CrossAxisAlignment::kCenter);
++      auto* key = hint->AddChildView(std::make_unique<views::Label>(
++          keys, views::style::CONTEXT_LABEL, views::style::STYLE_PRIMARY));
++      key->SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(1, 5)));
++      key->SetBackground(views::CreateRoundedRectBackground(
++          ui::kColorSubtleEmphasisBackground, kKeyRadius));
++      hint->AddChildView(std::make_unique<views::Label>(
++          action, views::style::CONTEXT_LABEL, views::style::STYLE_SECONDARY));
++    }
++    if (mode_ == PaletteMode::kGoto) {
++      auto* count = footer_->AddChildView(std::make_unique<views::Label>(
++          base::NumberToString16(tab_count_) + u" tabs open",
++          views::style::CONTEXT_LABEL, views::style::STYLE_SECONDARY));
++      count->SetHorizontalAlignment(gfx::ALIGN_RIGHT);
++      footer_layout_->SetFlexForView(count, 1);
++    }
++  }
++
+   void Accept(size_t index) {
+     if (index >= shown_.size()) {
+       return;
+     }
++    AcceptItem(shown_[index]);
++  }
++
++  void AcceptItem(const Item& item) {
+     // Run after the bubble has gone so focus restoration cannot undo what the
+     // action focuses (find bar, location bar, a new tab).
+     base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+-        FROM_HERE, base::BindOnce(&ActOn, base::Unretained(browser_.get()),
+-                                  shown_[index]));
++        FROM_HERE,
++        base::BindOnce(&ActOn, base::Unretained(browser_.get()), item));
+     GetWidget()->Close();
+   }
+ 
+@@ -933,7 +982,8 @@ class PaletteContents : public views::View, public views::TextfieldController {
+   base::RepeatingClosure resize_;
+   raw_ptr<views::Textfield> input_ = nullptr;
+   raw_ptr<views::View> list_ = nullptr;
+-  raw_ptr<views::Label> footer_ = nullptr;
++  raw_ptr<views::View> footer_ = nullptr;
++  raw_ptr<views::BoxLayout> footer_layout_ = nullptr;
+   raw_ptr<views::ImageView> preview_icon_ = nullptr;
+   raw_ptr<views::ImageView> preview_thumbnail_ = nullptr;
+   raw_ptr<views::Label> preview_title_ = nullptr;
