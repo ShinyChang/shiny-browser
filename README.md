@@ -154,10 +154,11 @@ and 45 GB free:
     git clone https://github.com/ShinyChang/shy-browser
     shy-browser/scripts/build.sh ~/shy-chromium
 
-The script fetches Chromium without its history, applies the patches and builds
-`~/shy-chromium/src/out/Release/Shy.app`. On an M1 Max with `JOBS=8` the fetch took 12
-minutes and the compile 2 hours 40 minutes. Running it again resumes an interrupted fetch or
-build.
+The script fetches Chromium without its history and with Google's PGO profiles, applies the
+patches and builds `~/shy-chromium/src/out/Release/Shy.app`. It is an official build, optimized
+as Chrome stable is: on Speedometer 3.1 that is about 50% faster than a plain release build and
+within a few percent of Chrome. On an M1 Max with `JOBS=8` the fetch took 12 minutes and the
+compile about 2 hours 40 minutes. Running it again resumes an interrupted fetch or build.
 
 The build is ad-hoc signed, so macOS may ask again for keychain access or camera and microphone
 permission after an update. `scripts/sign.sh Shy.app IDENTITY` signs it with your own

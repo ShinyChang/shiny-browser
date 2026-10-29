@@ -36,7 +36,8 @@ solutions = [
     "url": "$URL",
     "managed": False,
     "custom_deps": {},
-    "custom_vars": {},
+    # An official build (args.gn) needs the PGO profiles, which gclient fetches only when asked.
+    "custom_vars": {"checkout_pgo_profiles": True},
   },
 ]
 EOF
