@@ -15,10 +15,10 @@ Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
  2 files changed, 43 insertions(+)
 
 diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.cc b/chrome/browser/ui/views/location_bar/location_bar_view.cc
-index bac174d0b2..7385e0870b 100644
+index d07cbfe86c..d59c795545 100644
 --- a/chrome/browser/ui/views/location_bar/location_bar_view.cc
 +++ b/chrome/browser/ui/views/location_bar/location_bar_view.cc
-@@ -16,6 +16,7 @@
+@@ -17,6 +17,7 @@
  #include "base/metrics/field_trial_params.h"
  #include "base/trace_event/trace_event.h"
  #include "build/build_config.h"
@@ -26,7 +26,7 @@ index bac174d0b2..7385e0870b 100644
  #include "chrome/app/vector_icons/vector_icons.h"
  #include "chrome/browser/actor/ui/actor_ui_window_controller.h"
  #include "chrome/browser/autocomplete/aim_eligibility_service_factory.h"
-@@ -31,6 +32,7 @@
+@@ -32,6 +33,7 @@
  #include "chrome/browser/translate/translate_service.h"
  #include "chrome/browser/ui/actions/chrome_action_id.h"
  #include "chrome/browser/ui/browser_actions.h"
@@ -34,7 +34,7 @@ index bac174d0b2..7385e0870b 100644
  #include "chrome/browser/ui/browser_element_identifiers.h"
  #include "chrome/browser/ui/browser_window.h"
  #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
-@@ -95,6 +97,7 @@
+@@ -96,6 +98,7 @@
  #include "chrome/common/chrome_features.h"
  #include "chrome/grit/generated_resources.h"
  #include "chrome/grit/omnibox_popup_resources.h"
@@ -42,7 +42,7 @@ index bac174d0b2..7385e0870b 100644
  #include "components/commerce/core/commerce_feature_list.h"
  #include "components/content_settings/core/browser/host_content_settings_map.h"
  #include "components/content_settings/core/common/features.h"
-@@ -503,6 +506,27 @@ void LocationBarView::Init() {
+@@ -513,6 +516,27 @@ void LocationBarView::Init() {
    clear_all_button_ = AddChildView(std::move(clear_all_button));
    RefreshClearAllButtonIcon();
  
@@ -70,7 +70,7 @@ index bac174d0b2..7385e0870b 100644
    auto ai_mode_hint_label = std::make_unique<views::Label>(
        std::u16string(), CONTEXT_OMNIBOX_PRIMARY, views::style::STYLE_PRIMARY);
    ai_mode_hint_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-@@ -934,6 +958,8 @@ void LocationBarView::Layout(PassKey) {
+@@ -951,6 +975,8 @@ void LocationBarView::Layout(PassKey) {
  
    add_trailing_decoration(clear_all_button_, /*intra_item_padding=*/0,
                            /*edge_padding=*/trailing_decorations_edge_padding);
@@ -79,7 +79,7 @@ index bac174d0b2..7385e0870b 100644
  
    // Perform layout.
    int entry_width = width();
-@@ -2039,6 +2065,7 @@ void LocationBarView::OnChanged() {
+@@ -2148,6 +2174,7 @@ void LocationBarView::OnChanged() {
        GetOmniboxController()->edit_model()->user_input_in_progress() &&
        !omnibox_view_->GetText().empty() &&
        IsVirtualKeyboardVisible(GetWidget()));
@@ -87,7 +87,7 @@ index bac174d0b2..7385e0870b 100644
  
    InvalidateLayout();
    SchedulePaint();
-@@ -2070,6 +2097,7 @@ void LocationBarView::OnOmniboxFocused() {
+@@ -2179,6 +2206,7 @@ void LocationBarView::OnOmniboxFocused() {
    // The AI mode page action should only be visible when the omnibox
    // is focused, so if there is a change in focus, refresh the icon.
    RefreshAiModePageAction();
@@ -95,7 +95,7 @@ index bac174d0b2..7385e0870b 100644
  }
  
  void LocationBarView::OpenOmniboxPopup(bool query_zps) {
-@@ -2081,6 +2109,7 @@ void LocationBarView::OpenOmniboxPopup(bool query_zps) {
+@@ -2191,6 +2219,7 @@ void LocationBarView::OpenOmniboxPopup(bool query_zps) {
  }
  
  void LocationBarView::OnOmniboxBlurred() {
@@ -103,7 +103,7 @@ index bac174d0b2..7385e0870b 100644
    if (views::FocusRing::Get(this)) {
      views::FocusRing::Get(this)->Refresh();
    }
-@@ -2107,6 +2136,17 @@ void LocationBarView::OnOmniboxHovered(bool is_hovering) {
+@@ -2217,6 +2246,17 @@ void LocationBarView::OnOmniboxHovered(bool is_hovering) {
    } else {
      hover_animation_.Hide();
    }
@@ -122,10 +122,10 @@ index bac174d0b2..7385e0870b 100644
  
  void LocationBarView::OnTouchUiChanged() {
 diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.h b/chrome/browser/ui/views/location_bar/location_bar_view.h
-index 05979cd142..3b3a97d137 100644
+index 317211c69c..0cccf460b1 100644
 --- a/chrome/browser/ui/views/location_bar/location_bar_view.h
 +++ b/chrome/browser/ui/views/location_bar/location_bar_view.h
-@@ -376,6 +376,7 @@ class LocationBarView
+@@ -378,6 +378,7 @@ class LocationBarView
  
    // Updates the color of the icon for the "clear all" button.
    void RefreshClearAllButtonIcon();
@@ -133,7 +133,7 @@ index 05979cd142..3b3a97d137 100644
  
    // Returns true if a keyword is selected in the model.
    bool ShouldShowKeywordBubble() const;
-@@ -596,6 +597,8 @@ class LocationBarView
+@@ -620,6 +621,8 @@ class LocationBarView
    // user to clear all text.
    raw_ptr<views::ImageButton> clear_all_button_ = nullptr;
  

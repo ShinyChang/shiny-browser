@@ -14,7 +14,7 @@ Subject: [PATCH] feat: finish the Shiny rebrand in strings and logos
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
 ---
- chrome/app/chromium_strings.grd               | 1162 ++++++++---------
+ chrome/app/chromium_strings.grd               | 1166 ++++++++---------
  chrome/app/settings_chromium_strings.grdp     |  238 ++--
  chrome/app/theme/chromium/product_logo.svg    |    2 +-
  .../app/theme/chromium/product_logo_128.png   |  Bin 4393 -> 14497 bytes
@@ -36,10 +36,10 @@ Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
  ...refresh_showcase_illustration_chromium.png |  Bin 861858 -> 907613 bytes
  components/components_chromium_strings.grd    |   38 +-
  .../strings/extensions_chromium_strings.grdp  |   10 +-
- 22 files changed, 726 insertions(+), 768 deletions(-)
+ 22 files changed, 728 insertions(+), 770 deletions(-)
 
 diff --git a/chrome/app/chromium_strings.grd b/chrome/app/chromium_strings.grd
-index 35dcdad4ef..42c8b8e7b0 100644
+index cac5d1389e..71480e6a2b 100644
 --- a/chrome/app/chromium_strings.grd
 +++ b/chrome/app/chromium_strings.grd
 @@ -302,7 +302,7 @@ If you update this file, be sure also to update google_chrome_strings.grd. -->
@@ -1995,7 +1995,7 @@ index 35dcdad4ef..42c8b8e7b0 100644
          </message>
        </if>
        <!-- Relaunch notification bubble and dialog. -->
-@@ -2517,118 +2517,118 @@ Chromium is unable to recover your settings.
+@@ -2517,124 +2517,124 @@ Chromium is unable to recover your settings.
          <if expr="not is_chromeos">
            <message name="IDS_RELAUNCH_RECOMMENDED_TITLE" desc="The title of a dialog that tells users that a browser relaunch is recommended for an update available for some number of days.">
              {0, plural,
@@ -2015,9 +2015,17 @@ index 35dcdad4ef..42c8b8e7b0 100644
 +              =1 {Your administrator asks that you relaunch Shiny to apply this update. Your Incognito window won't reopen.}
 +              other {Your administrator asks that you relaunch Shiny to apply this update. Your # Incognito windows won't reopen.}}
            </message>
-           <message name="IDS_RELAUNCH_RECOMMENDED_SCHEDULED_IDLE_TOAST" desc="Toast notification message shown after scheduling an idle restart." translateable="false">
--            Chromium will restart when you're next idle
-+            Shiny will restart when you're next idle
+           <message name="IDS_RELAUNCH_RECOMMENDED_SCHEDULED_IDLE_TOAST" desc="Toast notification message shown after scheduling an idle restart.">
+-            Chromium will update when you're away
++            Shiny will update when you're away
+           </message>
+           <message name="IDS_RELAUNCH_RECOMMENDED_SCHEDULED_TITLE" desc="The title of a bubble dialog that tells users that Chromium wants to update.">
+-            Chromium wants to update
++            Shiny wants to update
+           </message>
+           <message name="IDS_RELAUNCH_RECOMMENDED_BODY_SCHEDULE" desc="The first body paragraph for the scheduled restart reminder bubble dialog.">
+-            An <ph name="IMPORTANT_UPDATE">$1<ex>important security update</ex></ph> is pending. To keep your browsing safe, Chromium will update the next time you're inactive for <ph name="IDLE_DURATION">$2<ex>5 minutes</ex></ph>.
++            An <ph name="IMPORTANT_UPDATE">$1<ex>important security update</ex></ph> is pending. To keep your browsing safe, Shiny will update the next time you're inactive for <ph name="IDLE_DURATION">$2<ex>5 minutes</ex></ph>.
            </message>
            <message name="IDS_RELAUNCH_REQUIRED_TITLE_DAYS" desc="The title of a dialog that tells users the browser must be relaunched within two or more days.">
              {0, plural,
@@ -2155,7 +2163,7 @@ index 35dcdad4ef..42c8b8e7b0 100644
          </message>
        </if>
  
-@@ -2642,105 +2642,105 @@ Chromium is unable to recover your settings.
+@@ -2648,105 +2648,105 @@ Chromium is unable to recover your settings.
        <!-- Chrome parent extension/app install blocking dialog. -->
        <if expr="enable_extensions_core">
          <message name="IDS_EXTENSION_PERMISSIONS_BLOCKED_BY_PARENT_PROMPT_MESSAGE" desc="Text for the dialog indicating that a parent has blocked extensions and apps.">
@@ -2289,7 +2297,7 @@ index 35dcdad4ef..42c8b8e7b0 100644
          </message>
  
          <!-- Feature Showcase - Password Manager -->
-@@ -2748,7 +2748,7 @@ Chromium is unable to recover your settings.
+@@ -2754,7 +2754,7 @@ Chromium is unable to recover your settings.
            Stay safe with Password Manager
          </message>
          <message name="IDS_FEATURE_SHOWCASE_PASSWORD_MANAGER_SUBTITLE" desc="Description for the Password Manager page in the Feature Showcase.">
@@ -2298,7 +2306,7 @@ index 35dcdad4ef..42c8b8e7b0 100644
          </message>
  
          <!-- Feature Showcase - Lens -->
-@@ -2761,14 +2761,14 @@ Chromium is unable to recover your settings.
+@@ -2767,14 +2767,14 @@ Chromium is unable to recover your settings.
  
          <!-- Feature Showcase - Gemini -->
          <message name="IDS_FEATURE_SHOWCASE_GEMINI_TITLE" desc="This is the headline for the Gemini (AI assistant) opt-in screen. It introduces the benefit of AI assistance for productivity. (CHAR LIMIT = 60)">
@@ -2315,7 +2323,7 @@ index 35dcdad4ef..42c8b8e7b0 100644
        </message>
  
        <!-- Notification quiet permission IPH -->
-@@ -2781,20 +2781,20 @@ Chromium is unable to recover your settings.
+@@ -2787,20 +2787,20 @@ Chromium is unable to recover your settings.
  
        <!-- ChromeLabs bubble -->
        <message name="IDS_CHROMELABS_RELAUNCH_FOOTER_MESSAGE" desc="Text that shows in the footer of the Chrome Labs bubble when relaunch is needed for changes to take effect.">
@@ -2340,7 +2348,7 @@ index 35dcdad4ef..42c8b8e7b0 100644
        </message>
        <message name="IDS_TAILORED_SECURITY_UNCONSENTED_PROMOTION_MESSAGE_DESCRIPTION" desc="Description shown in the message shown when a user changes their account-level tailored security setting encouraging them to enable Enhanced Safe Browsing">
          Enhanced protection does more to block phishing and malware
-@@ -2809,39 +2809,39 @@ Chromium is unable to recover your settings.
+@@ -2815,39 +2815,39 @@ Chromium is unable to recover your settings.
        <!--Launch On Startup-->
        <if expr="is_win">
          <message name="IDS_SETTINGS_FOREGROUND_LAUNCH_ON_STARTUP_LABEL" desc="Label for settings toggle button that enables or disables opening Chromium on system startup">
@@ -2390,7 +2398,7 @@ index 35dcdad4ef..42c8b8e7b0 100644
          </message>
          <message name="IDS_NO_UPDATE_RESPONSE" desc="Updater response for no updates when handling install result.">
            No update is available
-@@ -2850,7 +2850,7 @@ Chromium is unable to recover your settings.
+@@ -2856,7 +2856,7 @@ Chromium is unable to recover your settings.
            Installation failed. Please try again.
          </message>
          <message name="IDS_INSTALLER_DISPLAY_NAME" desc="Name for the updater metainstaller.">
@@ -2399,7 +2407,7 @@ index 35dcdad4ef..42c8b8e7b0 100644
          </message>
          <message name="IDS_CLOSE_BUTTON" desc="Close button tooltip">
            Close
-@@ -2889,13 +2889,13 @@ Chromium is unable to recover your settings.
+@@ -2895,13 +2895,13 @@ Chromium is unable to recover your settings.
            Canceling...
          </message>
          <message name="IDS_TEXT_RESTART_BROWSER" desc="For when a browser must be restarted to complete the installation.">
@@ -2416,7 +2424,7 @@ index 35dcdad4ef..42c8b8e7b0 100644
          </message>
          <message name="IDS_UPDATER_CLOSE" desc="For close button on the UI post install completion.">
            Close
-@@ -2955,7 +2955,7 @@ Chromium is unable to recover your settings.
+@@ -2961,7 +2961,7 @@ Chromium is unable to recover your settings.
          <!--Network errors.-->
          <message name="IDS_NO_NETWORK_PRESENT_ERROR"
                   desc="Error message displayed in the main dialog when the Updater is unable to connect to the network.">
@@ -2425,7 +2433,7 @@ index 35dcdad4ef..42c8b8e7b0 100644
          </message>
          <message name="IDS_ERROR_HTTPSTATUS_UNAUTHORIZED"
                   desc="Error message displayed in the main dialog when an update check or download fails due to unauthorized access, usually due to proxy problems.">
-@@ -3081,101 +3081,101 @@ Chromium is unable to recover your settings.
+@@ -3087,101 +3087,101 @@ Chromium is unable to recover your settings.
          <!--Windows service strings.-->
          <message name="IDS_UPDATER_SERVICE_DISPLAY_NAME"
                   desc="The name of the Windows service. Displayed in the Windows Services management console.">
@@ -2548,7 +2556,7 @@ index 35dcdad4ef..42c8b8e7b0 100644
        </message>
        <message name="IDS_GLIC_STATUS_ICON_TOOLTIP_CANARY" translateable="false" desc="This is the tooltip that is shown when the glic status icon is hovered and the Glic window is closed. It indicates that this is the Canary version of the browser.">
          Open Gemini (Canary)
-@@ -3187,7 +3187,7 @@ Chromium is unable to recover your settings.
+@@ -3193,7 +3193,7 @@ Chromium is unable to recover your settings.
          Open Gemini (Beta)
        </message>
        <message name="IDS_GLIC_STATUS_ICON_TOOLTIP_CLOSE" translateable="false" desc="This is the tooltip that is shown when the glic status icon is hovered and the Glic window is open.">
@@ -2557,7 +2565,7 @@ index 35dcdad4ef..42c8b8e7b0 100644
        </message>
        <message name="IDS_GLIC_STATUS_ICON_TOOLTIP_CLOSE_CANARY" translateable="false" desc="This is the tooltip that is shown when the glic status icon is hovered and the Glic window is open. It indicates that this is the Canary version of the browser.">
          Close Gemini (Canary)
-@@ -3199,7 +3199,7 @@ Chromium is unable to recover your settings.
+@@ -3205,7 +3205,7 @@ Chromium is unable to recover your settings.
          Close Gemini (Beta)
        </message>
        <message name="IDS_GLIC_STATUS_ICON_TOOLTIP_TOGGLE" translateable="false" desc="This is the tooltip that is shown when the glic status icon is hovered.">
@@ -2566,7 +2574,7 @@ index 35dcdad4ef..42c8b8e7b0 100644
        </message>
        <message name="IDS_GLIC_STATUS_ICON_TOOLTIP_TOGGLE_CANARY" translateable="false" desc="This is the tooltip that is shown when the glic status icon is hovered. It indicates that this is the Canary version of the browser.">
          Toggle Gemini (Canary)
-@@ -3211,81 +3211,81 @@ Chromium is unable to recover your settings.
+@@ -3217,81 +3217,81 @@ Chromium is unable to recover your settings.
          Toggle Gemini (Beta)
        </message>
        <message name="IDS_GLIC_STATUS_ICON_MENU_SHOW" translateable="false" desc="This is the menu item for showing the glic UI.">
@@ -2669,7 +2677,7 @@ index 35dcdad4ef..42c8b8e7b0 100644
          </message>
        </if>
        <message name="IDS_SETTINGS_OMNIBOX_EVERYWHERE_TITLE" desc="Title of the Omnibox Everywhere section on the search settings page.">
-@@ -3293,94 +3293,94 @@ Chromium is unable to recover your settings.
+@@ -3299,94 +3299,94 @@ Chromium is unable to recover your settings.
        </message>
        <if expr="is_macosx">
          <message name="IDS_SETTINGS_OMNIBOX_EVERYWHERE_TOGGLE" desc="Name of the toggle that controls whether Search with Chromium is shown in the Mac menu bar (on Mac only).">
@@ -2787,7 +2795,7 @@ index 35dcdad4ef..42c8b8e7b0 100644
        </message>
        <message name="IDS_DICE_MIGRATION_CONFIRMATION_TOAST_BUTTON" desc="The text on the button of the confirmation toast shown after the user clicks the accept button on the Dice Migration dialog, that allows the users to control the sync settings or sign out of Chrome.">
          Manage
-@@ -3390,12 +3390,12 @@ Chromium is unable to recover your settings.
+@@ -3396,12 +3396,12 @@ Chromium is unable to recover your settings.
        <if expr="not is_android">
          <if expr="use_titlecase">
            <message name="IDS_PROFILE_MENU_ACCOUNT_SETTINGS_BUTTON" desc="Button in the avatar menu bubble view for opening Chrome account settings.">
@@ -2802,12 +2810,15 @@ index 35dcdad4ef..42c8b8e7b0 100644
            </message>
          </if>
        </if>
-@@ -3409,10 +3409,10 @@ Chromium is unable to recover your settings.
+@@ -3415,13 +3415,13 @@ Chromium is unable to recover your settings.
          </message>
  
          <message name="IDS_DICTATION_ONBOARDING_TITLE" desc="The title string in the onboarding dialog for the dictation feature." translateable="false">
 -          Turn your spoken thoughts into polished text with Chromium
 +          Turn your spoken thoughts into polished text with Shiny
+         </message>
+         <message name="IDS_DICTATION_ONBOARDING_BULLET_DATA_SHARING" desc="The second paragraph in the onboarding dialog describing data sharing with Google servers." translateable="false">
+           The content and URL of the page you're on and your spoken audio will be sent to Google to generate text based on what you say and the page context
          </message>
          <message name="IDS_DICTATION_ONBOARDING_BULLET_MICROPHONE" desc="The first paragraph in the onboarding dialog describing how the microphone is used." translateable="false">
 -          Chromium will use your microphone to capture your voice and fill in text fields with cleaned up text.
@@ -2815,7 +2826,7 @@ index 35dcdad4ef..42c8b8e7b0 100644
          </message>
          <message name="IDS_DICTATION_ONBOARDING_BULLET_DISCLAIMER" desc="The disclaimer text in the onboarding dialog describing the use of AI and potential for mistakes and providing a link for more details." translateable="false">
            Dictation uses AI and can make mistakes. <ph name="LEARN_MORE_LINK">$1<ex>Learn more</ex></ph>
-@@ -3422,140 +3422,140 @@ Chromium is unable to recover your settings.
+@@ -3431,140 +3431,140 @@ Chromium is unable to recover your settings.
        <!--Desktop to iOS promo strings-->
        <if expr="not is_android">
          <message name="IDS_IOS_DESKTOP_ESB_PROMO_BUBBLE_DESCRIPTION_REMINDER" desc="The description for the iOS desktop ESB promo bubble with a reminder button.">
@@ -2998,7 +3009,7 @@ index 35dcdad4ef..42c8b8e7b0 100644
          </message>
        </if>
  
-@@ -3566,7 +3566,7 @@ Chromium is unable to recover your settings.
+@@ -3575,7 +3575,7 @@ Chromium is unable to recover your settings.
        </message>
        <message name="IDS_DEFAULT_SEARCH_ENGINE_RESET_NOTIFICATION_BODY"
           desc="Body text of the notification shown when Chromium resets the default search engine, explaining that a change from outside Chromium was detected.">
@@ -3007,7 +3018,7 @@ index 35dcdad4ef..42c8b8e7b0 100644
        </message>
        <message name="IDS_DEFAULT_SEARCH_ENGINE_RESET_NOTIFICATION_GOT_IT_BUTTON"
           desc="Label for the 'Got it' button in the default search engine reset notification, which dismisses the UI.">
-@@ -3594,15 +3594,15 @@ Chromium is unable to recover your settings.
+@@ -3603,15 +3603,15 @@ Chromium is unable to recover your settings.
  
        <!-- JS optimizations bubble -->
        <message name="IDS_JS_OPTIMIZATION_BUBBLE_BODY_NON_POLICY_BODY" desc="Body text for the JavaScript optimization bubble when disabled for other reasons.">
@@ -3024,9 +3035,9 @@ index 35dcdad4ef..42c8b8e7b0 100644
 -        Sign in to Chromium
 +        Sign in to Shiny
        </message>
- 
-       <!-- Contextual Tasks -->
-@@ -3612,10 +3612,10 @@ If this page isn’t working as expected, try allowing optimization.
+       <message name="IDS_SEND_TAB_TO_SELF_SIGN_IN_PROMO_LABEL" desc="Text when a signed out user attempts to use send-tab-to-self, then sees a sign-in promo.">
+         To send this tab to another device, sign in to Chromium on both devices
+@@ -3637,10 +3637,10 @@ If this page isn’t working as expected, try allowing optimization.
  
        <!-- Enterprise device signals disclaimer -->
        <message name="IDS_ENTERPRISE_DEVICE_SIGNALS_DISCLAIMER_TITLE" desc="Title of an enterprise device signals collection disclaimer modal dialog. The dialog is shown on Chrome startup to managed Chrome users who have not previously acknowledged device signals collection.">
@@ -3040,7 +3051,7 @@ index 35dcdad4ef..42c8b8e7b0 100644
      </messages>
    </release>
 diff --git a/chrome/app/settings_chromium_strings.grdp b/chrome/app/settings_chromium_strings.grdp
-index 237b2a8517..6cc71780c0 100644
+index 66b9cc089b..d9178c1207 100644
 --- a/chrome/app/settings_chromium_strings.grdp
 +++ b/chrome/app/settings_chromium_strings.grdp
 @@ -4,7 +4,7 @@
@@ -3274,8 +3285,8 @@ index 237b2a8517..6cc71780c0 100644
 +    Warns you about dangerous sites, even ones Google didn't know about before, by analyzing more data from sites than standard protection. You can choose to skip Shiny warnings.
    </message>
    <message name="IDS_SETTINGS_SAFEBROWSING_ENHANCED_LEARN_MORE_LABEL" desc="The text for a link to a help center article that gives more information about Safe Browsing.">
--    Learn more about <ph name="BEGIN_LINK">&lt;a href="#" id="enhancedProtectionLearnMoreLink" on-click="onEnhancedProtectionLearnMoreClick_"&gt;</ph>how Chromium keeps your data private<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph>
-+    Learn more about <ph name="BEGIN_LINK">&lt;a href="#" id="enhancedProtectionLearnMoreLink" on-click="onEnhancedProtectionLearnMoreClick_"&gt;</ph>how Shiny keeps your data private<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph>
+-    Learn more about <ph name="BEGIN_LINK">&lt;a href="#" id="enhancedProtectionLearnMoreLink"&gt;</ph>how Chromium keeps your data private<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph>
++    Learn more about <ph name="BEGIN_LINK">&lt;a href="#" id="enhancedProtectionLearnMoreLink"&gt;</ph>how Shiny keeps your data private<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph>
    </message>
    <message name="IDS_SETTINGS_SECURE_DNS_DESCRIPTION" desc="Secondary, continued explanation of secure DNS in Privacy options">
 -    Make it harder for people with access to your internet traffic to see which sites you visit. Chromium uses a secure connection to look up a site's IP address in the DNS (Domain Name System).

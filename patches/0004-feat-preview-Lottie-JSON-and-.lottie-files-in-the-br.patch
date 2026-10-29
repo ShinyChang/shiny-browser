@@ -44,7 +44,7 @@ Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
  create mode 100644 chrome/browser/resources/lottie_preview/viewer.js
 
 diff --git a/chrome/browser/extensions/component_extensions_allowlist/allowlist.cc b/chrome/browser/extensions/component_extensions_allowlist/allowlist.cc
-index 4fb8aaa6b8..6115656b58 100644
+index 242d73beec..a8cd527c8c 100644
 --- a/chrome/browser/extensions/component_extensions_allowlist/allowlist.cc
 +++ b/chrome/browser/extensions/component_extensions_allowlist/allowlist.cc
 @@ -39,6 +39,7 @@ bool IsComponentExtensionAllowlisted(const std::string& extension_id) {
@@ -55,19 +55,19 @@ index 4fb8aaa6b8..6115656b58 100644
        extension_misc::kPdfExtensionId,
  #if BUILDFLAG(IS_CHROMEOS)
        extension_misc::kAssessmentAssistantExtensionId,
-@@ -96,6 +97,7 @@ bool IsComponentExtensionAllowlisted(int manifest_resource_id) {
+@@ -95,6 +96,7 @@ bool IsComponentExtensionAllowlisted(int manifest_resource_id) {
      case IDR_AIM_ELIGIBILITY_EXTENSION_MANIFEST_JSON:
      case IDR_CONTEXTUAL_TASKS_EXTENSION_MANIFEST_JSON:
      case IDR_GLIC_EXTENSION_MANIFEST:
 +    case IDR_LOTTIE_PREVIEW_MANIFEST:
      case IDR_NETWORK_SPEECH_SYNTHESIS_MANIFEST:
      case IDR_NETWORK_SPEECH_SYNTHESIS_MANIFEST_MV3:
-     case IDR_READING_MODE_GDOCS_HELPER_MANIFEST:
+     case IDR_WEBSTORE_MANIFEST:
 diff --git a/chrome/browser/extensions/component_loader.cc b/chrome/browser/extensions/component_loader.cc
-index 54969eebf8..89972cd2d6 100644
+index afe6eac8e5..8086a6f489 100644
 --- a/chrome/browser/extensions/component_loader.cc
 +++ b/chrome/browser/extensions/component_loader.cc
-@@ -646,6 +646,10 @@ scoped_refptr<const Extension> ComponentLoader::CreateExtension(
+@@ -647,6 +647,10 @@ scoped_refptr<const Extension> ComponentLoader::CreateExtension(
    // TODO(abarth): We should REQUIRE_MODERN_MANIFEST_VERSION once we've updated
    //               our component extensions to the new manifest version.
    int flags = Extension::REQUIRE_KEY;
@@ -78,7 +78,7 @@ index 54969eebf8..89972cd2d6 100644
  
  #if BUILDFLAG(IS_CHROMEOS)
    // ChromeOS component extension (GoogleTTS) needs to use symlinks to share
-@@ -785,6 +789,8 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
+@@ -786,6 +790,8 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
      Add(IDR_ARC_SUPPORT_MANIFEST,
          base::FilePath(FILE_PATH_LITERAL("chromeos/arc_support")));
  #endif  // BUILDFLAG(IS_CHROMEOS)
@@ -11662,7 +11662,7 @@ index 0000000000..ae4e4c6b7b
 +  readUrl(location.hash.slice('#src='.length));
 +}
 diff --git a/extensions/browser/extension_util.cc b/extensions/browser/extension_util.cc
-index 7f5cb29d20..260a068b8e 100644
+index 257e48e23f..49a21e1477 100644
 --- a/extensions/browser/extension_util.cc
 +++ b/extensions/browser/extension_util.cc
 @@ -32,6 +32,7 @@
@@ -11673,7 +11673,7 @@ index 7f5cb29d20..260a068b8e 100644
  #include "extensions/common/extension.h"
  #include "extensions/common/extension_id.h"
  #include "extensions/common/extension_set.h"
-@@ -228,6 +229,7 @@ bool AllowFileAccess(const ExtensionId& extension_id,
+@@ -229,6 +230,7 @@ bool AllowFileAccess(const ExtensionId& extension_id,
                       content::BrowserContext* context) {
    return base::CommandLine::ForCurrentProcess()->HasSwitch(
               switches::kDisableExtensionsFileAccessCheck) ||
@@ -11681,7 +11681,7 @@ index 7f5cb29d20..260a068b8e 100644
           ExtensionPrefs::Get(context)->AllowFileAccess(extension_id);
  }
  
-@@ -392,10 +394,7 @@ void InitializeFileSchemeAccessForExtension(
+@@ -393,10 +395,7 @@ void InitializeFileSchemeAccessForExtension(
      content::ChildProcessId render_process_id,
      const ExtensionId& extension_id,
      content::BrowserContext* browser_context) {

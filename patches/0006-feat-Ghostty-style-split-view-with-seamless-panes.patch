@@ -23,7 +23,6 @@ Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
 ---
  chrome/app/chrome_command_ids.h               |  13 ++
  .../browser/global_keyboard_shortcuts_mac.mm  |   4 -
- chrome/browser/ui/BUILD.gn                    |   1 +
  chrome/browser/ui/actions/chrome_action_id.h  |  13 ++
  chrome/browser/ui/browser_actions.cc          |  29 +++
  .../browser/ui/browser_command_controller.cc  |  34 +++
@@ -32,16 +31,17 @@ Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
  .../ui/views/frame/contents_container_view.cc |  10 +-
  .../ui/views/frame/multi_contents_view.cc     |  42 +++-
  .../ui/views/frame/multi_contents_view.h      |   5 +-
+ chrome/browser/ui/views/ide/BUILD.gn          |   7 +
  chrome/browser/ui/views/ide/ide_internal.h    |  10 +
  chrome/browser/ui/views/ide/ide_palette.cc    |  43 +++-
  chrome/browser/ui/views/ide/ide_palette.h     |   4 +
  chrome/browser/ui/views/ide/ide_split.cc      | 215 ++++++++++++++++++
  chrome/browser/ui/views/ide/smoke.mjs         | 127 ++++++++++-
- 16 files changed, 632 insertions(+), 29 deletions(-)
+ 16 files changed, 638 insertions(+), 29 deletions(-)
  create mode 100644 chrome/browser/ui/views/ide/ide_split.cc
 
 diff --git a/chrome/app/chrome_command_ids.h b/chrome/app/chrome_command_ids.h
-index c252c1dabc..2402024ed6 100644
+index 48bfbf2493..710117787c 100644
 --- a/chrome/app/chrome_command_ids.h
 +++ b/chrome/app/chrome_command_ids.h
 @@ -61,6 +61,19 @@
@@ -86,20 +86,8 @@ index 1bbe4c5fab..5798f0c856 100644
        {true,  true,  false, true,  kVK_ANSI_A,            IDC_FOCUS_INACTIVE_POPUP_FOR_ACCESSIBILITY},
        {true,  false, false, true,  kVK_ANSI_R,            IDC_SHOW_READING_MODE_KEYBOARD},
      });
-diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
-index fbd5514d58..0a3f05b705 100644
---- a/chrome/browser/ui/BUILD.gn
-+++ b/chrome/browser/ui/BUILD.gn
-@@ -3541,6 +3541,7 @@ static_library("ui") {
-       "views/ide/ide_mru.cc",
-       "views/ide/ide_palette.cc",
-       "views/ide/ide_palette.h",
-+      "views/ide/ide_split.cc",
-     ]
-     if (is_mac) {
-       sources += [ "views/ide/ide_mac.mm" ]
 diff --git a/chrome/browser/ui/actions/chrome_action_id.h b/chrome/browser/ui/actions/chrome_action_id.h
-index b3b3b2f82e..9c100da32a 100644
+index ff923bcdb9..dab8bad6fd 100644
 --- a/chrome/browser/ui/actions/chrome_action_id.h
 +++ b/chrome/browser/ui/actions/chrome_action_id.h
 @@ -39,6 +39,19 @@
@@ -123,10 +111,10 @@ index b3b3b2f82e..9c100da32a 100644
    E(kActionSelectTab1, IDC_SELECT_TAB_1) \
    E(kActionSelectTab2, IDC_SELECT_TAB_2) \
 diff --git a/chrome/browser/ui/browser_actions.cc b/chrome/browser/ui/browser_actions.cc
-index 6098e9aaf7..603b1ea9d1 100644
+index 25f5d4a236..3497f445dc 100644
 --- a/chrome/browser/ui/browser_actions.cc
 +++ b/chrome/browser/ui/browser_actions.cc
-@@ -3116,6 +3116,35 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
+@@ -3141,6 +3141,35 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
            .SetActionId(kActionIdeCommandPalette)
            .Build());
  
@@ -163,10 +151,10 @@ index 6098e9aaf7..603b1ea9d1 100644
        actions::ActionItem::Builder(
            base::BindRepeating(
 diff --git a/chrome/browser/ui/browser_command_controller.cc b/chrome/browser/ui/browser_command_controller.cc
-index 58a15f65d2..297b68b046 100644
+index aa362942ed..596080d9a9 100644
 --- a/chrome/browser/ui/browser_command_controller.cc
 +++ b/chrome/browser/ui/browser_command_controller.cc
-@@ -768,6 +768,21 @@ void BrowserCommandController::HandleCommandWithDisposition(
+@@ -780,6 +780,21 @@ void BrowserCommandController::HandleCommandWithDisposition(
      case IDC_IDE_COMMAND_PALETTE:
        ide::ShowPalette(browser_, ide::PaletteMode::kCommands);
        break;
@@ -188,7 +176,7 @@ index 58a15f65d2..297b68b046 100644
      case IDC_CLOSE_TAB:
        base::RecordAction(base::UserMetricsAction("CloseTabByKey"));
        CloseTab(browser_);
-@@ -2777,6 +2792,25 @@ void BrowserCommandController::UpdateCommandsForTabStripStateChanged() {
+@@ -2842,6 +2857,25 @@ void BrowserCommandController::UpdateCommandsForTabStripStateChanged() {
    command_updater_->UpdateCommandEnabled(
        IDC_NEW_SPLIT_TAB,
        browser_->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL);
@@ -376,7 +364,7 @@ index 1ce16ccf5d..6f43dbc3a7 100644
    return item;
  }
 diff --git a/chrome/browser/ui/views/frame/contents_container_view.cc b/chrome/browser/ui/views/frame/contents_container_view.cc
-index febd158b3d..94a2b3cb0c 100644
+index 5407bd717c..5675f69ecd 100644
 --- a/chrome/browser/ui/views/frame/contents_container_view.cc
 +++ b/chrome/browser/ui/views/frame/contents_container_view.cc
 @@ -54,7 +54,6 @@
@@ -520,6 +508,50 @@ index e39f000c2a..a2edcef34d 100644
    static constexpr gfx::RoundedCornersF kSplitViewContentRoundedCorners{
        kSplitViewContentCornerRadius};
  
+diff --git a/chrome/browser/ui/views/ide/BUILD.gn b/chrome/browser/ui/views/ide/BUILD.gn
+index ded0d25081..853035698c 100644
+--- a/chrome/browser/ui/views/ide/BUILD.gn
++++ b/chrome/browser/ui/views/ide/BUILD.gn
+@@ -16,6 +16,7 @@ source_set("impl") {
+     "ide_internal.h",
+     "ide_mru.cc",
+     "ide_palette.cc",
++    "ide_split.cc",
+   ]
+   deps = [
+     ":ide",
+@@ -30,18 +31,23 @@ source_set("impl") {
+     "//chrome/browser/ui:browser_commands",
+     "//chrome/browser/ui/browser_window",
+     "//chrome/browser/ui/navigator",
++    "//chrome/browser/ui/tabs",
+     "//chrome/browser/ui/tabs:tab_enums",
+     "//chrome/browser/ui/tabs:tab_strip",
+     "//chrome/browser/ui/views/download",
+     "//chrome/browser/ui/views/frame:browser_view_header",
++    "//chrome/common",
+     "//components/favicon/content",
+     "//components/history/core/browser",
+     "//components/keyed_service/core",
+     "//components/omnibox/browser",
+     "//components/sessions",
++    "//components/split_tabs",
++    "//components/tabs:public",
+     "//components/url_formatter",
+     "//components/vector_icons",
+     "//content/public/browser",
++    "//content/public/common",
+     "//third_party/metrics_proto",
+     "//ui/base",
+     "//ui/base/metadata",
+@@ -52,6 +58,7 @@ source_set("impl") {
+     "//ui/gfx/geometry",
+     "//ui/gfx/range",
+     "//ui/views",
++    "//ui/views/controls/webview",
+     "//url",
+   ]
+   if (is_mac) {
 diff --git a/chrome/browser/ui/views/ide/ide_internal.h b/chrome/browser/ui/views/ide/ide_internal.h
 index b112aaf6ca..4152c4dff8 100644
 --- a/chrome/browser/ui/views/ide/ide_internal.h

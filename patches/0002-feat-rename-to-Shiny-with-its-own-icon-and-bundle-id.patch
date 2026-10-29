@@ -43,7 +43,7 @@ Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
  create mode 100644 chrome/browser/ui/views/ide/smoke.mjs
 
 diff --git a/chrome/app/chromium_strings.grd b/chrome/app/chromium_strings.grd
-index 3de8ca69c9..35dcdad4ef 100644
+index 87499190d7..cac5d1389e 100644
 --- a/chrome/app/chromium_strings.grd
 +++ b/chrome/app/chromium_strings.grd
 @@ -294,10 +294,10 @@ If you update this file, be sure also to update google_chrome_strings.grd. -->

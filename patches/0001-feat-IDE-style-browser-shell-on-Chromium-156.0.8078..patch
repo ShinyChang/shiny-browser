@@ -22,17 +22,19 @@ Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
 ---
  chrome/app/app-Info.plist                     |    2 +
  chrome/app/chrome_command_ids.h               |    2 +
+ chrome/browser/BUILD.gn                       |    1 +
  chrome/browser/prefs/browser_prefs.cc         |    2 +-
- chrome/browser/ui/BUILD.gn                    |    8 +
+ chrome/browser/ui/BUILD.gn                    |    2 +
  chrome/browser/ui/actions/chrome_action_id.h  |    2 +
  chrome/browser/ui/browser_actions.cc          |   27 +-
  .../browser/ui/browser_command_controller.cc  |   23 +-
  chrome/browser/ui/cocoa/accelerators_cocoa.mm |    4 +-
  chrome/browser/ui/cocoa/main_menu_builder.mm  |   12 +
- .../browser/ui/toolbar/toolbar_pref_names.cc  |   28 +-
- chrome/browser/ui/ui_features.cc              |    2 +-
+ .../browser/ui/toolbar/toolbar_pref_names.cc  |   18 +-
+ chrome/browser/ui/views/BUILD.gn              |    1 +
  .../chrome_browser_main_extra_parts_views.cc  |    2 +
  .../browser_view_layout_delegate_impl.cc      |    7 +
+ chrome/browser/ui/views/ide/BUILD.gn          |   61 +
  chrome/browser/ui/views/ide/ide_idle_tabs.cc  |   79 ++
  chrome/browser/ui/views/ide/ide_internal.h    |  103 ++
  chrome/browser/ui/views/ide/ide_mac.mm        |   23 +
@@ -44,7 +46,8 @@ Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
  .../browser/ui/views/toolbar/toolbar_view.cc  |    8 +-
  .../bookmarks/browser/bookmark_utils.cc       |    4 +-
  .../core/browser/password_manager.cc          |    2 +-
- 24 files changed, 1615 insertions(+), 42 deletions(-)
+ 26 files changed, 1671 insertions(+), 31 deletions(-)
+ create mode 100644 chrome/browser/ui/views/ide/BUILD.gn
  create mode 100644 chrome/browser/ui/views/ide/ide_idle_tabs.cc
  create mode 100644 chrome/browser/ui/views/ide/ide_internal.h
  create mode 100644 chrome/browser/ui/views/ide/ide_mac.mm
@@ -66,7 +69,7 @@ index 6fada0a2b1..2fa05b59da 100644
  	<string>APPL</string>
  	<key>CFBundleSignature</key>
 diff --git a/chrome/app/chrome_command_ids.h b/chrome/app/chrome_command_ids.h
-index a9f146ad74..c252c1dabc 100644
+index e7b9327ce3..48bfbf2493 100644
 --- a/chrome/app/chrome_command_ids.h
 +++ b/chrome/app/chrome_command_ids.h
 @@ -59,6 +59,8 @@
@@ -78,11 +81,23 @@ index a9f146ad74..c252c1dabc 100644
  #define IDC_SELECT_TAB_0                34018
  #define IDC_SELECT_TAB_1                34019
  #define IDC_SELECT_TAB_2                34020
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index 814b9d649a..b658c0fd93 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -1480,6 +1480,7 @@ source_set("core") {
+       "//chrome/browser/ui/read_anything",
+       "//chrome/browser/ui/tabs/tab_drag_api/desktop_tab_drag_impl",
+       "//chrome/browser/ui/views/frame:glass_frame_service",
++      "//chrome/browser/ui/views/ide:impl",
+       "//chrome/browser/ui/views/tabs/organizer",
+       "//chrome/browser/ui/waap:waap_utils",
+       "//chrome/browser/ui/webui:chrome_content_browser_client_webui_part",
 diff --git a/chrome/browser/prefs/browser_prefs.cc b/chrome/browser/prefs/browser_prefs.cc
-index 35b02686a1..99bb40b24d 100644
+index 334da9ad62..ad010c10c5 100644
 --- a/chrome/browser/prefs/browser_prefs.cc
 +++ b/chrome/browser/prefs/browser_prefs.cc
-@@ -1881,7 +1881,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry,
+@@ -2020,7 +2020,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry,
    contextual_search::ContextualSearchService::RegisterProfilePrefs(registry);
    contextual_tasks::RegisterProfilePrefs(registry);
    registry->RegisterIntegerPref(prefs::kContextualTasksNextPanelOpenCount, 0);
@@ -92,27 +107,27 @@ index 35b02686a1..99bb40b24d 100644
    device_signals::RegisterProfilePrefs(registry);
    enterprise::RegisterIdentifiersProfilePrefs(registry);
 diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
-index 238f8625e4..fbd5514d58 100644
+index 1e352a02e9..766627038d 100644
 --- a/chrome/browser/ui/BUILD.gn
 +++ b/chrome/browser/ui/BUILD.gn
-@@ -3536,7 +3536,15 @@ static_library("ui") {
-       "views/frame/horizontal_tab_strip_region_view.h",
-       "views/frame/vertical_tab_strip_region_view.cc",
-       "views/frame/vertical_tab_strip_region_view.h",
-+      "views/ide/ide_idle_tabs.cc",
-+      "views/ide/ide_internal.h",
-+      "views/ide/ide_mru.cc",
-+      "views/ide/ide_palette.cc",
-+      "views/ide/ide_palette.h",
-     ]
-+    if (is_mac) {
-+      sources += [ "views/ide/ide_mac.mm" ]
-+    }
- 
-     sources += get_target_outputs(":webui_name_variants")
- 
+@@ -368,6 +368,7 @@ if (!is_android) {
+       "//chrome/browser/ui/views/frame:app_menu_button_observer",
+       "//chrome/browser/ui/views/frame:browser_view_header",
+       "//chrome/browser/ui/views/frame:toolbar_button_provider",
++      "//chrome/browser/ui/views/ide",
+       "//chrome/browser/ui/views/js_optimization",
+       "//chrome/browser/ui/views/location_bar/cookie_controls",
+       "//chrome/browser/ui/views/media_router",
+@@ -736,6 +737,7 @@ if (!is_android) {
+       "//chrome/browser/ui/toolbar/chrome_labs",
+       "//chrome/browser/ui/user_education",
+       "//chrome/browser/ui/views/frame:browser_view_header",
++      "//chrome/browser/ui/views/ide",
+       "//chrome/browser/ui/web_applications",
+       "//chrome/browser/ui/web_applications:launch_utils",
+       "//chrome/browser/ui/webui/inspect",
 diff --git a/chrome/browser/ui/actions/chrome_action_id.h b/chrome/browser/ui/actions/chrome_action_id.h
-index 49f05998da..b3b3b2f82e 100644
+index b1ba8e8be0..ff923bcdb9 100644
 --- a/chrome/browser/ui/actions/chrome_action_id.h
 +++ b/chrome/browser/ui/actions/chrome_action_id.h
 @@ -37,6 +37,8 @@
@@ -125,7 +140,7 @@ index 49f05998da..b3b3b2f82e 100644
    E(kActionSelectTab1, IDC_SELECT_TAB_1) \
    E(kActionSelectTab2, IDC_SELECT_TAB_2) \
 diff --git a/chrome/browser/ui/browser_actions.cc b/chrome/browser/ui/browser_actions.cc
-index 0f7a326019..6098e9aaf7 100644
+index 3c89142611..25f5d4a236 100644
 --- a/chrome/browser/ui/browser_actions.cc
 +++ b/chrome/browser/ui/browser_actions.cc
 @@ -53,6 +53,7 @@
@@ -136,7 +151,7 @@ index 0f7a326019..6098e9aaf7 100644
  #include "chrome/browser/ui/web_applications/web_app_launch_utils.h"
  #include "chrome/common/webui_url_constants.h"
  #include "components/saved_tab_groups/public/tab_group_sync_service.h"
-@@ -3063,7 +3064,7 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
+@@ -3088,7 +3089,7 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
                  if (chrome::IsCtrlTabMruEnabled(bwi)) {
                    base::RecordAction(
                        base::UserMetricsAction("Accel_CycleToNextTab"));
@@ -145,7 +160,7 @@ index 0f7a326019..6098e9aaf7 100644
                  } else {
                    base::RecordAction(
                        base::UserMetricsAction("Accel_SelectNextTab"));
-@@ -3082,7 +3083,7 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
+@@ -3107,7 +3108,7 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
                  if (chrome::IsCtrlTabMruEnabled(bwi)) {
                    base::RecordAction(
                        base::UserMetricsAction("Accel_CycleToPrevTab"));
@@ -154,7 +169,7 @@ index 0f7a326019..6098e9aaf7 100644
                  } else {
                    base::RecordAction(
                        base::UserMetricsAction("Accel_SelectPreviousTab"));
-@@ -3093,6 +3094,28 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
+@@ -3118,6 +3119,28 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
            .SetActionId(kActionCycleToPrevTab)
            .Build());
  
@@ -184,10 +199,10 @@ index 0f7a326019..6098e9aaf7 100644
        actions::ActionItem::Builder(
            base::BindRepeating(
 diff --git a/chrome/browser/ui/browser_command_controller.cc b/chrome/browser/ui/browser_command_controller.cc
-index 921461b9e9..58a15f65d2 100644
+index 8db5695096..aa362942ed 100644
 --- a/chrome/browser/ui/browser_command_controller.cc
 +++ b/chrome/browser/ui/browser_command_controller.cc
-@@ -59,6 +59,7 @@
+@@ -61,6 +61,7 @@
  #include "chrome/browser/ui/actions/command_action_updater.h"
  #include "chrome/browser/ui/browser_actions.h"
  #include "chrome/browser/ui/browser_commands.h"
@@ -195,7 +210,7 @@ index 921461b9e9..58a15f65d2 100644
  #include "chrome/browser/ui/browser_element_identifiers.h"
  #include "chrome/browser/ui/browser_select_file_dialog_controller.h"
  #include "chrome/browser/ui/browser_window.h"
-@@ -536,7 +537,8 @@ bool BrowserCommandController::IsReservedCommandOrKey(
+@@ -548,7 +549,8 @@ bool BrowserCommandController::IsReservedCommandOrKey(
           command_id == IDC_SELECT_NEXT_TAB ||
           command_id == IDC_SELECT_PREVIOUS_TAB ||
           command_id == IDC_CYCLE_TO_NEXT_TAB ||
@@ -205,7 +220,7 @@ index 921461b9e9..58a15f65d2 100644
  }
  
  void BrowserCommandController::TabStateChanged() {
-@@ -760,6 +762,12 @@ void BrowserCommandController::HandleCommandWithDisposition(
+@@ -772,6 +774,12 @@ void BrowserCommandController::HandleCommandWithDisposition(
        NewTabToRight(browser_);
        break;
      }
@@ -218,7 +233,7 @@ index 921461b9e9..58a15f65d2 100644
      case IDC_CLOSE_TAB:
        base::RecordAction(base::UserMetricsAction("CloseTabByKey"));
        CloseTab(browser_);
-@@ -781,10 +789,7 @@ void BrowserCommandController::HandleCommandWithDisposition(
+@@ -793,10 +801,7 @@ void BrowserCommandController::HandleCommandWithDisposition(
      case IDC_CYCLE_TO_NEXT_TAB:
        if (IsCtrlTabMruEnabled(browser_)) {
          base::RecordAction(base::UserMetricsAction("Accel_CycleToNextTab"));
@@ -230,7 +245,7 @@ index 921461b9e9..58a15f65d2 100644
        } else {
          base::RecordAction(base::UserMetricsAction("Accel_SelectNextTab"));
          SelectNextTab(browser_,
-@@ -796,10 +801,7 @@ void BrowserCommandController::HandleCommandWithDisposition(
+@@ -808,10 +813,7 @@ void BrowserCommandController::HandleCommandWithDisposition(
      case IDC_CYCLE_TO_PREV_TAB:
        if (IsCtrlTabMruEnabled(browser_)) {
          base::RecordAction(base::UserMetricsAction("Accel_CycleToPrevTab"));
@@ -242,7 +257,7 @@ index 921461b9e9..58a15f65d2 100644
        } else {
          base::RecordAction(base::UserMetricsAction("Accel_SelectPreviousTab"));
          SelectPreviousTab(
-@@ -1970,6 +1972,9 @@ void BrowserCommandController::InitCommandState() {
+@@ -2032,6 +2034,9 @@ void BrowserCommandController::InitCommandState() {
                                           supports_tabs);
    command_updater_->UpdateCommandEnabled(IDC_CYCLE_TO_NEXT_TAB, supports_tabs);
    command_updater_->UpdateCommandEnabled(IDC_CYCLE_TO_PREV_TAB, supports_tabs);
@@ -298,10 +313,10 @@ index 0476742487..1ce16ccf5d 100644
  }
  
 diff --git a/chrome/browser/ui/toolbar/toolbar_pref_names.cc b/chrome/browser/ui/toolbar/toolbar_pref_names.cc
-index f94f1a9c0c..8220890d01 100644
+index 69ea470005..dfcc531881 100644
 --- a/chrome/browser/ui/toolbar/toolbar_pref_names.cc
 +++ b/chrome/browser/ui/toolbar/toolbar_pref_names.cc
-@@ -15,31 +15,15 @@ namespace toolbar {
+@@ -14,21 +14,15 @@ namespace toolbar {
  
  void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
    base::ListValue default_pinned_actions;
@@ -318,16 +333,6 @@ index f94f1a9c0c..8220890d01 100644
 -    default_pinned_actions.Append(chrome_labs_action.value());
 -  }
 -
--  if (base::FeatureList::IsEnabled(
--          features::kTabsFromOtherDevicesSidePanelPinnedByDefault)) {
--    const std::optional<std::string>& tabs_from_other_devices_action =
--        actions::ActionIdMap::ActionIdToString(
--            kActionSidePanelShowTabsFromOtherDevices);
--    if (tabs_from_other_devices_action.has_value()) {
--      default_pinned_actions.Append(tabs_from_other_devices_action.value());
--    }
--  }
--
 -  if (base::FeatureList::IsEnabled(ttc::kTtc)) {
 -    const std::optional<std::string>& ttc_action =
 -        actions::ActionIdMap::ActionIdToString(kActionTtcToolbar);
@@ -339,19 +344,18 @@ index f94f1a9c0c..8220890d01 100644
    }
  
    registry->RegisterListPref(prefs::kPinnedActions,
-diff --git a/chrome/browser/ui/ui_features.cc b/chrome/browser/ui/ui_features.cc
-index 562d852958..ad09b2f13b 100644
---- a/chrome/browser/ui/ui_features.cc
-+++ b/chrome/browser/ui/ui_features.cc
-@@ -42,7 +42,7 @@ BASE_FEATURE(kAllowEyeDropperWGCScreenCapture,
- #endif  // BUILDFLAG(IS_WIN)
- );
- 
--BASE_FEATURE(kCtrlTabMru, base::FEATURE_DISABLED_BY_DEFAULT);
-+BASE_FEATURE(kCtrlTabMru, base::FEATURE_ENABLED_BY_DEFAULT);
- 
- BASE_FEATURE(kImportExportFlags, base::FEATURE_DISABLED_BY_DEFAULT);
- 
+diff --git a/chrome/browser/ui/views/BUILD.gn b/chrome/browser/ui/views/BUILD.gn
+index fc293bdac2..b501157610 100644
+--- a/chrome/browser/ui/views/BUILD.gn
++++ b/chrome/browser/ui/views/BUILD.gn
+@@ -1299,6 +1299,7 @@ source_set("chrome_browser_main_extra_parts_views") {
+     "//chrome/browser/ui/bookmarks",
+     "//chrome/browser/ui/infobars",
+     "//chrome/browser/ui/views/bookmarks",
++    "//chrome/browser/ui/views/ide",
+     "//chrome/browser/ui/views/media_router",
+     "//chrome/browser/ui/views/relaunch_notification",
+     "//chrome/common:constants",
 diff --git a/chrome/browser/ui/views/chrome_browser_main_extra_parts_views.cc b/chrome/browser/ui/views/chrome_browser_main_extra_parts_views.cc
 index 154a2af1cd..d02997b11f 100644
 --- a/chrome/browser/ui/views/chrome_browser_main_extra_parts_views.cc
@@ -390,6 +394,73 @@ index 162cb04878..11aa7f94b1 100644
    // Determine if there is a vertical tab strip.
    if (browser_view_->browser()->GetType() ==
        BrowserWindowInterface::Type::TYPE_NORMAL) {
+diff --git a/chrome/browser/ui/views/ide/BUILD.gn b/chrome/browser/ui/views/ide/BUILD.gn
+new file mode 100644
+index 0000000000..ded0d25081
+--- /dev/null
++++ b/chrome/browser/ui/views/ide/BUILD.gn
+@@ -0,0 +1,61 @@
++# Copyright 2026 The Chromium Authors
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++assert(!is_android)
++
++# Header only, so the browser command and action targets can call into it
++# without depending on the views it builds.
++source_set("ide") {
++  public = [ "ide_palette.h" ]
++}
++
++source_set("impl") {
++  sources = [
++    "ide_idle_tabs.cc",
++    "ide_internal.h",
++    "ide_mru.cc",
++    "ide_palette.cc",
++  ]
++  deps = [
++    ":ide",
++    "//base",
++    "//chrome/app:command_ids",
++    "//chrome/browser/autocomplete",
++    "//chrome/browser/history",
++    "//chrome/browser/media/webrtc",
++    "//chrome/browser/profiles:profile",
++    "//chrome/browser/resource_coordinator",
++    "//chrome/browser/sessions",
++    "//chrome/browser/ui:browser_commands",
++    "//chrome/browser/ui/browser_window",
++    "//chrome/browser/ui/navigator",
++    "//chrome/browser/ui/tabs:tab_enums",
++    "//chrome/browser/ui/tabs:tab_strip",
++    "//chrome/browser/ui/views/download",
++    "//chrome/browser/ui/views/frame:browser_view_header",
++    "//components/favicon/content",
++    "//components/history/core/browser",
++    "//components/keyed_service/core",
++    "//components/omnibox/browser",
++    "//components/sessions",
++    "//components/url_formatter",
++    "//components/vector_icons",
++    "//content/public/browser",
++    "//third_party/metrics_proto",
++    "//ui/base",
++    "//ui/base/metadata",
++    "//ui/base/mojom",
++    "//ui/color",
++    "//ui/events",
++    "//ui/gfx",
++    "//ui/gfx/geometry",
++    "//ui/gfx/range",
++    "//ui/views",
++    "//url",
++  ]
++  if (is_mac) {
++    sources += [ "ide_mac.mm" ]
++    deps += [ "//chrome/browser/ui/cocoa" ]
++  }
++}
 diff --git a/chrome/browser/ui/views/ide/ide_idle_tabs.cc b/chrome/browser/ui/views/ide/ide_idle_tabs.cc
 new file mode 100644
 index 0000000000..7e044c08ee
@@ -1943,10 +2014,10 @@ index 0000000000..a8a01c93e3
 +
 +#endif  // CHROME_BROWSER_UI_VIEWS_IDE_IDE_PALETTE_H_
 diff --git a/chrome/browser/ui/views/omnibox/omnibox_view_views.cc b/chrome/browser/ui/views/omnibox/omnibox_view_views.cc
-index 6ac205d996..5be9f70d69 100644
+index 5fe6c35545..5b1e361c9c 100644
 --- a/chrome/browser/ui/views/omnibox/omnibox_view_views.cc
 +++ b/chrome/browser/ui/views/omnibox/omnibox_view_views.cc
-@@ -284,6 +284,8 @@ void OmniboxViewViews::Init() {
+@@ -285,6 +285,8 @@ void OmniboxViewViews::Init() {
    set_controller(this);
    SetTextInputType(GetPreferredTextInputType());
    GetRenderText()->SetElideBehavior(gfx::ELIDE_TAIL);
@@ -1955,7 +2026,7 @@ index 6ac205d996..5be9f70d69 100644
    GetRenderText()->set_symmetric_selection_visual_bounds(true);
    InstallPlaceholderText();
    scoped_template_url_service_observation_.Observe(
-@@ -1729,6 +1731,7 @@ bool OmniboxViewViews::HandleAccessibleAction(
+@@ -1865,6 +1867,7 @@ bool OmniboxViewViews::HandleAccessibleAction(
  
  void OmniboxViewViews::OnFocus() {
    views::Textfield::OnFocus();
@@ -1963,7 +2034,7 @@ index 6ac205d996..5be9f70d69 100644
  
    // TODO(oshima): Get control key state.
    controller()->edit_model()->OnSetFocus(false);
-@@ -1776,6 +1779,7 @@ void OmniboxViewViews::OnFocus() {
+@@ -1912,6 +1915,7 @@ void OmniboxViewViews::OnFocus() {
  
  void OmniboxViewViews::OnBlur() {
    views::Textfield::OnBlur();
@@ -1972,10 +2043,10 @@ index 6ac205d996..5be9f70d69 100644
  
    views::FocusManager* focus_manager = GetFocusManager();
 diff --git a/chrome/browser/ui/views/toolbar/pinned_toolbar_actions_container.cc b/chrome/browser/ui/views/toolbar/pinned_toolbar_actions_container.cc
-index c61d5d0352..4f61230bbc 100644
+index 28cf6967b7..7a59a59606 100644
 --- a/chrome/browser/ui/views/toolbar/pinned_toolbar_actions_container.cc
 +++ b/chrome/browser/ui/views/toolbar/pinned_toolbar_actions_container.cc
-@@ -169,6 +169,8 @@ PinnedToolbarActionsContainer::PinnedToolbarActionsContainer(
+@@ -171,6 +171,8 @@ PinnedToolbarActionsContainer::PinnedToolbarActionsContainer(
            GetLayoutConstant(LayoutConstant::kToolbarDividerSpacing) -
                GetLayoutConstant(LayoutConstant::kToolbarIconDefaultMargin),
            0, GetLayoutConstant(LayoutConstant::kToolbarDividerSpacing)));
@@ -1985,10 +2056,10 @@ index c61d5d0352..4f61230bbc 100644
  
    // Initialize the pinned action buttons.
 diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.cc b/chrome/browser/ui/views/toolbar/toolbar_view.cc
-index f9bb38f923..492a1d9443 100644
+index 184ae3e5bc..0abb838cdd 100644
 --- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
 +++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
-@@ -611,9 +611,8 @@ void ToolbarView::Init() {
+@@ -601,9 +601,8 @@ void ToolbarView::Init() {
  
    if (!features::IsWebUIAvatarButtonEnabled()) {
      avatar_ = AddChildView(std::make_unique<AvatarToolbarButton>(browser_));
@@ -2000,7 +2071,7 @@ index f9bb38f923..492a1d9443 100644
    }
  
    // Only manage the overflow button when there are at least some views
-@@ -635,6 +634,9 @@ void ToolbarView::Init() {
+@@ -625,6 +624,9 @@ void ToolbarView::Init() {
          l10n_util::GetStringUTF16(IDS_APPMENU_TOOLTIP));
      app_menu_button->SetID(VIEW_ID_APP_MENU);
      app_menu_button_ = AddChildView(std::move(app_menu_button));
@@ -2011,7 +2082,7 @@ index f9bb38f923..492a1d9443 100644
  
    if (base::FeatureList::IsEnabled(contextual_tasks::kContextualTasks) &&
 diff --git a/components/bookmarks/browser/bookmark_utils.cc b/components/bookmarks/browser/bookmark_utils.cc
-index d8f32a1ca6..4f6fb3d69e 100644
+index 0e37a3aff2..d2c8ce8c77 100644
 --- a/components/bookmarks/browser/bookmark_utils.cc
 +++ b/components/bookmarks/browser/bookmark_utils.cc
 @@ -457,9 +457,9 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
@@ -2027,10 +2098,10 @@ index d8f32a1ca6..4f6fb3d69e 100644
        prefs::kShowAppsShortcutInBookmarkBar, false,
        user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
 diff --git a/components/password_manager/core/browser/password_manager.cc b/components/password_manager/core/browser/password_manager.cc
-index 89cdfdee32..4597e29c4c 100644
+index 7938d6a0d7..0bcc792290 100644
 --- a/components/password_manager/core/browser/password_manager.cc
 +++ b/components/password_manager/core/browser/password_manager.cc
-@@ -549,7 +549,7 @@ PasswordForm CreateFormForLeakCheck(const PasswordForm& pending_credentials,
+@@ -547,7 +547,7 @@ PasswordForm CreateFormForLeakCheck(const PasswordForm& pending_credentials,
  void PasswordManager::RegisterProfilePrefs(
      user_prefs::PrefRegistrySyncable* registry) {
    registry->RegisterBooleanPref(

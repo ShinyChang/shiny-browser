@@ -17,10 +17,10 @@ Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
  3 files changed, 6 insertions(+), 3 deletions(-)
 
 diff --git a/chrome/app/generated_resources.grd b/chrome/app/generated_resources.grd
-index 21e5fd0d92..64a0b86f53 100644
+index f853569503..6ddde7dd2e 100644
 --- a/chrome/app/generated_resources.grd
 +++ b/chrome/app/generated_resources.grd
-@@ -4773,7 +4773,7 @@ are declared in tools/grit/grit_args.gni.
+@@ -4776,7 +4776,7 @@ are declared in tools/grit/grit_args.gni.
          Allow remote debugging?
        </message>
        <message name="IDS_DEV_TOOLS_CONNECTION_DIALOG_MESSAGE_PART_1" desc="Message displayed in the dialog asking user to confirm allowing a debugging connection to this browser instance.">
@@ -30,10 +30,10 @@ index 21e5fd0d92..64a0b86f53 100644
        <message name="IDS_DEV_TOOLS_CONNECTION_DIALOG_MESSAGE_PART_2" desc="Message displayed in the dialog asking user to confirm allowing a debugging connection to this browser instance.">
          Only web developers should turn on this feature, and only use it with trusted apps.
 diff --git a/chrome/browser/browser_process_impl.cc b/chrome/browser/browser_process_impl.cc
-index bed9453f15..0e0b24e9a5 100644
+index 187e99b29b..083ee10aae 100644
 --- a/chrome/browser/browser_process_impl.cc
 +++ b/chrome/browser/browser_process_impl.cc
-@@ -1357,7 +1357,9 @@ void BrowserProcessImpl::RegisterPrefs(PrefRegistrySimple* registry) {
+@@ -1362,7 +1362,9 @@ void BrowserProcessImpl::RegisterPrefs(PrefRegistrySimple* registry) {
    registry->RegisterBooleanPref(metrics::prefs::kMetricsReportingEnabled,
                                  GoogleUpdateSettings::GetCollectStatsConsent());
    registry->RegisterBooleanPref(prefs::kDevToolsRemoteDebuggingAllowed, true);
@@ -45,12 +45,12 @@ index bed9453f15..0e0b24e9a5 100644
  #if BUILDFLAG(IS_LINUX) && BUILDFLAG(USE_DBUS)
    os_crypt_async::SecretPortalKeyProvider::RegisterLocalPrefs(registry);
 diff --git a/third_party/blink/renderer/platform/runtime_enabled_features.json5 b/third_party/blink/renderer/platform/runtime_enabled_features.json5
-index 32931ee250..3acbcd3f54 100644
+index 8f5b96aa1c..23edc91bee 100644
 --- a/third_party/blink/renderer/platform/runtime_enabled_features.json5
 +++ b/third_party/blink/renderer/platform/runtime_enabled_features.json5
-@@ -7213,7 +7213,8 @@
-         "WebMCPFormAssociatedCustomElements",
-         "WebMCPTesting"
+@@ -7415,7 +7415,8 @@
+         "WebMCPDeclarativeFileInput",
+         "WebMCPFormAssociatedCustomElements"
        ],
 -      status: "experimental",
 +      // Pages can register tools for agents without a flag or an origin trial token.

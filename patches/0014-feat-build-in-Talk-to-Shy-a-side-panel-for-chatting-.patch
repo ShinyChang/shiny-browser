@@ -26,9 +26,10 @@ Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
  .../browser/resources/talk_to_shy/panel.html  |  58 ++++
  chrome/browser/resources/talk_to_shy/panel.js | 219 +++++++++++++
  .../ui/toolbar/toolbar_actions_model.cc       |  23 ++
+ chrome/browser/ui/views/ide/BUILD.gn          |   1 +
  chrome/browser/ui/views/ide/ide_palette.cc    |   8 +
  extensions/common/constants.h                 |   2 +
- 13 files changed, 808 insertions(+)
+ 14 files changed, 809 insertions(+)
  create mode 100644 chrome/browser/resources/talk_to_shy/background.js
  create mode 100644 chrome/browser/resources/talk_to_shy/defaults.js
  create mode 100644 chrome/browser/resources/talk_to_shy/icon.png
@@ -38,7 +39,7 @@ Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
  create mode 100644 chrome/browser/resources/talk_to_shy/panel.js
 
 diff --git a/chrome/browser/extensions/component_extensions_allowlist/allowlist.cc b/chrome/browser/extensions/component_extensions_allowlist/allowlist.cc
-index 6115656b58..4a3c1c6fe3 100644
+index a8cd527c8c..d104191e4c 100644
 --- a/chrome/browser/extensions/component_extensions_allowlist/allowlist.cc
 +++ b/chrome/browser/extensions/component_extensions_allowlist/allowlist.cc
 @@ -41,6 +41,7 @@ bool IsComponentExtensionAllowlisted(const std::string& extension_id) {
@@ -49,19 +50,19 @@ index 6115656b58..4a3c1c6fe3 100644
  #if BUILDFLAG(IS_CHROMEOS)
        extension_misc::kAssessmentAssistantExtensionId,
        extension_misc::kAccessibilityCommonExtensionId,
-@@ -101,6 +102,7 @@ bool IsComponentExtensionAllowlisted(int manifest_resource_id) {
+@@ -99,6 +100,7 @@ bool IsComponentExtensionAllowlisted(int manifest_resource_id) {
+     case IDR_LOTTIE_PREVIEW_MANIFEST:
      case IDR_NETWORK_SPEECH_SYNTHESIS_MANIFEST:
      case IDR_NETWORK_SPEECH_SYNTHESIS_MANIFEST_MV3:
-     case IDR_READING_MODE_GDOCS_HELPER_MANIFEST:
 +    case IDR_TALK_TO_SHY_MANIFEST:
      case IDR_WEBSTORE_MANIFEST:
  
  #if BUILDFLAG(IS_CHROMEOS)
 diff --git a/chrome/browser/extensions/component_loader.cc b/chrome/browser/extensions/component_loader.cc
-index 89972cd2d6..e3631edf2b 100644
+index 8086a6f489..73cb8be04d 100644
 --- a/chrome/browser/extensions/component_loader.cc
 +++ b/chrome/browser/extensions/component_loader.cc
-@@ -791,6 +791,8 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
+@@ -792,6 +792,8 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
  #endif  // BUILDFLAG(IS_CHROMEOS)
      Add(IDR_LOTTIE_PREVIEW_MANIFEST,
          base::FilePath(FILE_PATH_LITERAL("lottie_preview")));
@@ -1095,6 +1096,18 @@ index 0536936bb6..7b90b7d5b6 100644
    // Set |pinned_action_ids_| directly to avoid notifying observers that they
    // have changed even though they haven't.
    pinned_action_ids_ = GetFilteredPinnedActionIds();
+diff --git a/chrome/browser/ui/views/ide/BUILD.gn b/chrome/browser/ui/views/ide/BUILD.gn
+index 058d10ef1b..46ff76f81d 100644
+--- a/chrome/browser/ui/views/ide/BUILD.gn
++++ b/chrome/browser/ui/views/ide/BUILD.gn
+@@ -30,6 +30,7 @@ source_set("impl") {
+     "//chrome/browser/sessions",
+     "//chrome/browser/ui:browser_commands",
+     "//chrome/browser/ui/browser_window",
++    "//chrome/browser/ui/extensions",
+     "//chrome/browser/ui/navigator",
+     "//chrome/browser/ui/tabs",
+     "//chrome/browser/ui/tabs:tab_enums",
 diff --git a/chrome/browser/ui/views/ide/ide_palette.cc b/chrome/browser/ui/views/ide/ide_palette.cc
 index bf4857ecb8..b9e2d57887 100644
 --- a/chrome/browser/ui/views/ide/ide_palette.cc

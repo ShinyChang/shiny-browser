@@ -10,16 +10,16 @@ and the panel.
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
 ---
- chrome/browser/ui/layout_constants.cc               |  3 ++-
- .../frame/layout/browser_view_tabbed_layout_impl.cc | 12 +++++-------
- chrome/browser/ui/views/side_panel/side_panel.cc    | 13 ++++---------
- 3 files changed, 11 insertions(+), 17 deletions(-)
+ chrome/browser/ui/layout_constants.cc                |  3 ++-
+ .../frame/layout/browser_view_tabbed_layout_impl.cc  | 12 +++++-------
+ chrome/browser/ui/views/side_panel/side_panel.cc     | 11 ++++-------
+ 3 files changed, 11 insertions(+), 15 deletions(-)
 
 diff --git a/chrome/browser/ui/layout_constants.cc b/chrome/browser/ui/layout_constants.cc
-index 5b86765bfa..a0f31ecd44 100644
+index b8206dc188..06c225ef3b 100644
 --- a/chrome/browser/ui/layout_constants.cc
 +++ b/chrome/browser/ui/layout_constants.cc
-@@ -140,7 +140,8 @@ int GetLayoutConstant(LayoutConstant constant) {
+@@ -150,7 +150,8 @@ int GetLayoutConstant(LayoutConstant constant) {
      case LayoutConstant::kLocationBarMargin:
        return touch_ui ? 12 : 9;
      case LayoutConstant::kSidePanelInset:
@@ -30,10 +30,10 @@ index 5b86765bfa..a0f31ecd44 100644
        return 20;
      case LayoutConstant::kDownloadIconSize:
 diff --git a/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc b/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
-index 389c6f8c6e..ab9e1ef69e 100644
+index 7764d4a472..ee2cd7eba6 100644
 --- a/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
 +++ b/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
-@@ -238,9 +238,9 @@ BrowserViewTabbedLayoutImpl::CalculateSeparatorInfo() const {
+@@ -284,9 +284,9 @@ BrowserViewTabbedLayoutImpl::CalculateSeparatorInfo() const {
    switch (layout_data_->window_state) {
      case WindowState::kNormal:
      case WindowState::kMaximized: {
@@ -46,7 +46,7 @@ index 389c6f8c6e..ab9e1ef69e 100644
        const bool suppress_separator = info.shadow_box && is_force_to_top;
        info.multi_contents_separator = !suppress_separator && !has_infobar;
        info.top_container_separator = !suppress_separator && has_infobar;
-@@ -250,8 +250,7 @@ BrowserViewTabbedLayoutImpl::CalculateSeparatorInfo() const {
+@@ -296,8 +296,7 @@ BrowserViewTabbedLayoutImpl::CalculateSeparatorInfo() const {
        break;
      }
      case WindowState::kFullscreen:
@@ -56,7 +56,7 @@ index 389c6f8c6e..ab9e1ef69e 100644
        // Mac and ChromeOS display separators on their slide-in top containers.
        // However, if top container elements are not visible (for example,
        // because they are offscreen), the separator is not shown.
-@@ -260,8 +259,7 @@ BrowserViewTabbedLayoutImpl::CalculateSeparatorInfo() const {
+@@ -306,8 +305,7 @@ BrowserViewTabbedLayoutImpl::CalculateSeparatorInfo() const {
        info.side_panel_top_padding = true;
        break;
      case WindowState::kFullscreenWithToolbar:
@@ -67,7 +67,7 @@ index 389c6f8c6e..ab9e1ef69e 100644
        info.adjust_for_missing_separator =
            info.shadow_box && would_have_separator;
 diff --git a/chrome/browser/ui/views/side_panel/side_panel.cc b/chrome/browser/ui/views/side_panel/side_panel.cc
-index 48d9dd0848..9b3be14e5a 100644
+index 0098885c7d..9b3be14e5a 100644
 --- a/chrome/browser/ui/views/side_panel/side_panel.cc
 +++ b/chrome/browser/ui/views/side_panel/side_panel.cc
 @@ -72,8 +72,9 @@ constexpr BrowserAnimationGroup kAnimationGroup =
@@ -81,17 +81,15 @@ index 48d9dd0848..9b3be14e5a 100644
  }
  
  // This is how many units of the toolbar are essentially expected to be
-@@ -217,14 +218,8 @@ class ContentParentView : public views::View, public views::ViewObserver {
+@@ -217,12 +218,8 @@ class ContentParentView : public views::View, public views::ViewObserver {
                                      base::Unretained(this)));
    }
  
 -  gfx::RoundedCornersF GetRoundedCorners() {
--    ChromeDistanceMetric corner_radius =
--        ChromeDistanceMetric::DISTANCE_SIDE_PANEL_CONTENT_RADIUS;
--    return GetLayoutProvider()
--               ? gfx::RoundedCornersF(
--                     GetLayoutProvider()->GetDistanceMetric(corner_radius))
--               : gfx::RoundedCornersF();
+-    return GetLayoutProvider() ? gfx::RoundedCornersF(
+-                                     GetLayoutProvider()->GetCornerRadiusMetric(
+-                                         kSidePanelContentRadius))
+-                               : gfx::RoundedCornersF();
 -  }
 +  // Flush content has no inset for rounded corners to sit in.
 +  gfx::RoundedCornersF GetRoundedCorners() { return gfx::RoundedCornersF(); }

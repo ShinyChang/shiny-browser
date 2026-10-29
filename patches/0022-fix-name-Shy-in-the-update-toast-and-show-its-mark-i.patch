@@ -17,10 +17,10 @@ Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
  3 files changed, 8 insertions(+), 2 deletions(-)
 
 diff --git a/chrome/app/generated_resources.grd b/chrome/app/generated_resources.grd
-index 3572385c4d..788a0790e8 100644
+index 237ad758c2..3fb20903bc 100644
 --- a/chrome/app/generated_resources.grd
 +++ b/chrome/app/generated_resources.grd
-@@ -19570,7 +19570,7 @@ Please help our engineers fix this problem. Tell us what happened right before y
+@@ -19728,7 +19728,7 @@ Please help our engineers fix this problem. Tell us what happened right before y
          Close
        </message>
        <message name="IDS_NON_MILESTONE_UPDATE_TOAST_BODY" desc="Text on a toast notification that is shown when a non milestone update is complete.">

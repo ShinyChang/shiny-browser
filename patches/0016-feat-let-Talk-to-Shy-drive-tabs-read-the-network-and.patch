@@ -30,10 +30,10 @@ Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
  7 files changed, 681 insertions(+), 52 deletions(-)
 
 diff --git a/chrome/browser/extensions/api/debugger/debugger_api.cc b/chrome/browser/extensions/api/debugger/debugger_api.cc
-index 4f4153a4bd..4e22215ed8 100644
+index 2045d721ba..9f6bef051b 100644
 --- a/chrome/browser/extensions/api/debugger/debugger_api.cc
 +++ b/chrome/browser/extensions/api/debugger/debugger_api.cc
-@@ -598,11 +598,13 @@ bool ExtensionDevToolsClientHost::Attach() {
+@@ -599,11 +599,13 @@ bool ExtensionDevToolsClientHost::Attach() {
    }
  
    // We allow policy-installed extensions to circumvent the normal

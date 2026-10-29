@@ -110,10 +110,10 @@ index e49648c05c..bdff492530 100644
      </else>
    </if>
 diff --git a/components/autofill_payments_strings.grdp b/components/autofill_payments_strings.grdp
-index 9d9f4795f2..f522c49f1e 100644
+index c8084fea93..c1cf19e0e4 100644
 --- a/components/autofill_payments_strings.grdp
 +++ b/components/autofill_payments_strings.grdp
-@@ -284,13 +284,13 @@
+@@ -297,13 +297,13 @@
      </if>
      <if expr="not _google_chrome">
        <message name="IDS_AUTOFILL_SAVE_AND_FILL_DIALOG_EXPLANATION_LOCAL" desc="Explanation text for the Autofill Save and Fill dialog for cards that will be saved locally.">
@@ -130,7 +130,7 @@ index 9d9f4795f2..f522c49f1e 100644
        </message>
      </if>
      <message name="IDS_AUTOFILL_SAVE_AND_FILL_DIALOG_CARD_NUMBER_LABEL" desc="The label text for the card number textfield.">
-@@ -603,13 +603,13 @@
+@@ -616,13 +616,13 @@
      </if>
      <if expr="not _google_chrome">
        <message name="IDS_PAYMENTS_AUTOFILL_FILLING_MANDATORY_REAUTH" desc="Text that appears in the payments autofill mandatory re-authentication popup as the sublabel, asking the user to authenticate using biometric or device unlock before filling.">
@@ -148,7 +148,7 @@ index 9d9f4795f2..f522c49f1e 100644
      </if>
    </if>
 diff --git a/components/autofill_strings.grdp b/components/autofill_strings.grdp
-index a4548a5b6d..d48280ad37 100644
+index 1a36a8d52b..83bd036083 100644
 --- a/components/autofill_strings.grdp
 +++ b/components/autofill_strings.grdp
 @@ -62,13 +62,13 @@
@@ -168,7 +168,7 @@ index a4548a5b6d..d48280ad37 100644
      </message>
    </if>
    <message name="IDS_AUTOFILL_REMOVE_HOME_PROFILE_SUGGESTION_CONFIRMATION_TITLE" desc="Title in a dialog to confirm that the user wants to delete their Home address from Autofill." formatter_data="android_java">
-@@ -2040,13 +2040,13 @@ You can remove this suggestion from Chrome. Your original source won't be delete
+@@ -2039,13 +2039,13 @@ You can remove this suggestion from Chrome. Your original source won't be delete
    </if>
    <if expr="not _google_chrome">
      <message name="IDS_SETTINGS_AUTOFILL_AI_TOGGLE_SUB_LABEL" desc="The description of the setting. By 'understand forms better', we mean that when a user submits a form on a website, and if they're using smarter form understanding, this feature can offer to save the user's submitted info. When Chromium saves that info, we save the submitted values and consider the page context." formatter_data="android_java">

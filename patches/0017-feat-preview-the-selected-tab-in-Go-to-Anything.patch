@@ -13,28 +13,16 @@ Subject: [PATCH] feat: preview the selected tab in Go to Anything
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
 ---
- chrome/browser/ui/BUILD.gn                 |   1 +
  chrome/browser/ui/ui_features.cc           |   9 +-
+ chrome/browser/ui/views/ide/BUILD.gn       |   2 +
  chrome/browser/ui/views/ide/ide_palette.cc | 121 ++++++++++++++++++++-
- 3 files changed, 122 insertions(+), 9 deletions(-)
+ 3 files changed, 123 insertions(+), 9 deletions(-)
 
-diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
-index 91ed593130..5475cd661f 100644
---- a/chrome/browser/ui/BUILD.gn
-+++ b/chrome/browser/ui/BUILD.gn
-@@ -3543,6 +3543,7 @@ static_library("ui") {
-       "views/ide/ide_palette.h",
-       "views/ide/ide_split.cc",
-     ]
-+    deps += [ "//chrome/browser/ui/thumbnails" ]
-     if (is_mac) {
-       sources += [ "views/ide/ide_mac.mm" ]
-       deps += [ "//chrome/browser/ui/webui/help" ]
 diff --git a/chrome/browser/ui/ui_features.cc b/chrome/browser/ui/ui_features.cc
-index ad09b2f13b..f28a4c2c0b 100644
+index 1f958582a0..aa7fcf73ea 100644
 --- a/chrome/browser/ui/ui_features.cc
 +++ b/chrome/browser/ui/ui_features.cc
-@@ -266,13 +266,8 @@ BASE_FEATURE(kNewTabButtonContextMenu, base::FEATURE_ENABLED_BY_DEFAULT);
+@@ -278,13 +278,8 @@ BASE_FEATURE(kNewTabButtonContextMenu, base::FEATURE_ENABLED_BY_DEFAULT);
  
  // Enables preview images in tab-hover cards.
  // https://crbug.com/41439486
@@ -50,6 +38,26 @@ index ad09b2f13b..f28a4c2c0b 100644
  
  BASE_FEATURE(kTabModalUsesDesktopWidget, base::FEATURE_DISABLED_BY_DEFAULT);
  
+diff --git a/chrome/browser/ui/views/ide/BUILD.gn b/chrome/browser/ui/views/ide/BUILD.gn
+index 46ff76f81d..45d6bc3e03 100644
+--- a/chrome/browser/ui/views/ide/BUILD.gn
++++ b/chrome/browser/ui/views/ide/BUILD.gn
+@@ -35,6 +35,7 @@ source_set("impl") {
+     "//chrome/browser/ui/tabs",
+     "//chrome/browser/ui/tabs:tab_enums",
+     "//chrome/browser/ui/tabs:tab_strip",
++    "//chrome/browser/ui/thumbnails",
+     "//chrome/browser/ui/views/download",
+     "//chrome/browser/ui/views/frame:browser_view_header",
+     "//chrome/common",
+@@ -54,6 +55,7 @@ source_set("impl") {
+     "//ui/base/metadata",
+     "//ui/base/mojom",
+     "//ui/color",
++    "//ui/compositor",
+     "//ui/events",
+     "//ui/gfx",
+     "//ui/gfx/geometry",
 diff --git a/chrome/browser/ui/views/ide/ide_palette.cc b/chrome/browser/ui/views/ide/ide_palette.cc
 index b9e2d57887..25ff6b8209 100644
 --- a/chrome/browser/ui/views/ide/ide_palette.cc

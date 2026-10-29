@@ -23,10 +23,10 @@ Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
  3 files changed, 539 insertions(+), 54 deletions(-)
 
 diff --git a/chrome/browser/extensions/api/debugger/debugger_api.cc b/chrome/browser/extensions/api/debugger/debugger_api.cc
-index 4e22215ed8..fc9266b0c8 100644
+index 9f6bef051b..aa9a947ea6 100644
 --- a/chrome/browser/extensions/api/debugger/debugger_api.cc
 +++ b/chrome/browser/extensions/api/debugger/debugger_api.cc
-@@ -846,7 +846,10 @@ bool ExtensionDevToolsClientHost::IsTrusted() {
+@@ -847,7 +847,10 @@ bool ExtensionDevToolsClientHost::IsTrusted() {
  }
  
  bool ExtensionDevToolsClientHost::MayReadLocalFiles() {

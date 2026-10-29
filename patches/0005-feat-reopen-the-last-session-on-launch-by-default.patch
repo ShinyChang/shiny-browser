@@ -13,10 +13,10 @@ Claude-Session: https://claude.ai/code/session_01BYkQJUafT3hpFT1kBmDgzX
  1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/chrome/browser/prefs/session_startup_pref.cc b/chrome/browser/prefs/session_startup_pref.cc
-index 0159cee9db..4f500016e2 100644
+index 72fc94f516..2cdfe439b5 100644
 --- a/chrome/browser/prefs/session_startup_pref.cc
 +++ b/chrome/browser/prefs/session_startup_pref.cc
-@@ -71,7 +71,8 @@ SessionStartupPref::Type SessionStartupPref::GetDefaultStartupType() {
+@@ -82,7 +82,8 @@ SessionStartupPref::Type SessionStartupPref::GetDefaultStartupType() {
      return SessionStartupPref::LAST;
    }
  #endif
